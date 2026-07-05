@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "sunny-mod",
+  "version": "${version}",
+  "name": "Sunny Mod",
+  "description": "A client-side mod for the Sunny Minecraft server by midwu",
+  "authors": ["midwu"],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/sunny-mod/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["me.midwu.sunnyMod.SunnyMod"],
+    "client": [
+      "me.midwu.sunnyMod.client.SunnyModClient",
+      "me.midwu.sunnyMod.client.ShopLogger",
+      "me.midwu.sunnyMod.client.Hud",
+      "me.midwu.sunnyMod.client.Commands",
+      "me.midwu.sunnyMod.client.FishingLogger",
+      "me.midwu.sunnyMod.client.EarningsDetector"
+    ],
+    "modmenu": [
+      "me.midwu.sunnyMod.client.ModMenuIntegration"
+    ]
+  },
+  "mixins": [
+    "sunny-mod.mixins.json",
+    {
+      "config": "sunny-mod.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.2",
+    "fabric-api": "*",
+    "minecraft": "1.21.11",
+    "cloth-config": "*",
+    "modmenu": "*"
+  }
+}
