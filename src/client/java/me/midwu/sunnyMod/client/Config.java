@@ -16,7 +16,7 @@ public class Config {
             FabricLoader.getInstance().getConfigDir().resolve("sunnymod-config.json");
 
     // ── Feature toggles ───────────────────────────────────────────────────────
-    public boolean shopLoggerEnabled       = false; // disabled by default
+    public boolean shopLoggerEnabled       = false;
     public boolean earningsDetectorEnabled = true;
     public boolean fishingLoggerEnabled    = true;
 
@@ -50,6 +50,11 @@ public class Config {
     public int earningsY = 36;
     public int shopX     = 6;
     public int shopY     = 66;
+
+    // ── Shop Sign HUD ─────────────────────────────────────────────────────────
+    public int shopSignX = 180;
+    public int shopSignY = 6;
+    public boolean shopSignVisible = true;
 
     // ── HUD panel visibility ──────────────────────────────────────────────────
     public boolean fishingVisible  = true;
@@ -109,9 +114,13 @@ public class Config {
         fishingX  = 6;  fishingY  = 6;
         earningsX = 6;  earningsY = 36;
         shopX     = 6;  shopY     = 66;
+        shopSignX = 180; shopSignY = 6;
+
         fishingVisible  = true;
         earningsVisible = true;
         shopVisible     = true;
+        shopSignVisible = true;
+
         panelOrder = Arrays.asList("fishing", "earnings", "shop");
     }
 

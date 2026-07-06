@@ -54,6 +54,10 @@ public class Hud implements ClientModInitializer {
         return PADDING + LINE_HEIGHT + 3 + LINE_HEIGHT + PADDING;
     }
 
+    public static int getShopSignPanelHeight() {
+        return ShopSignHud.SIGN_HEIGHT;
+    }
+
     // ── Auto-hide logic ───────────────────────────────────────────────────────
 
     private boolean earningsShouldAutoHide() {
@@ -118,6 +122,11 @@ public class Hud implements ClientModInitializer {
                 case "earnings" -> { if (cfg.earningsVisible && !earningsShouldAutoHide()) renderEarningsPanel(ctx, client, cfg.earningsX, cfg.earningsY); }
                 case "shop"     -> { if (cfg.shopVisible && !shopShouldAutoHide())         renderShopPanel(ctx, client, cfg.shopX, cfg.shopY); }
             }
+        }
+
+        // Shop Sign HUD
+        if (cfg.shopSignVisible) {
+            ShopSignHud.render(ctx, client, cfg.shopSignX, cfg.shopSignY);
         }
     }
 

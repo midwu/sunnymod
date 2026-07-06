@@ -66,7 +66,9 @@ public class ModMenuIntegration implements ModMenuApi {
         // ── Feedback ──────────────────────────────────────────────────────────
         ConfigCategory feedback = builder.getOrCreateCategory(Text.literal("Feedback"));
 
-        feedback.addEntry(eb.startTextDescription(Text.literal("§eShop Logger messages")).build());
+        feedback.addEntry(eb.startTextDescription(
+                        Text.literal("§eShop Logger messages"))
+                .build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Shop: Added"),
@@ -108,7 +110,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackWarpSet = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(Text.literal("§eEarnings Detector messages")).build());
+        feedback.addEntry(eb.startTextDescription(
+                        Text.literal("§eEarnings Detector messages"))
+                .build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Earnings: Per Sale"),
@@ -118,7 +122,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackEarningsPerSale = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(Text.literal("§eFishing Logger messages")).build());
+        feedback.addEntry(eb.startTextDescription(
+                        Text.literal("§eFishing Logger messages"))
+                .build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Fishing: Exported to CSV"),
@@ -136,7 +142,9 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackFishingFailed = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(Text.literal("§eCommand messages")).build());
+        feedback.addEntry(eb.startTextDescription(
+                        Text.literal("§eCommand messages"))
+                .build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Command: Earnings Reset"),
@@ -192,6 +200,14 @@ public class ModMenuIntegration implements ModMenuApi {
                         cfg.shopVisible)
                 .setDefaultValue(true)
                 .setSaveConsumer(v -> cfg.shopVisible = v)
+                .build());
+
+        hud.addEntry(eb.startBooleanToggle(
+                        Text.literal("Shop Sign HUD Visible"),
+                        cfg.shopSignVisible)
+                .setDefaultValue(true)
+                .setTooltip(Text.literal("Show the floating shop sign HUD with last shop info"))
+                .setSaveConsumer(v -> cfg.shopSignVisible = v)
                 .build());
 
         hud.addEntry(eb.startTextDescription(

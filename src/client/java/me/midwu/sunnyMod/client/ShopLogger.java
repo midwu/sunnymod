@@ -64,7 +64,7 @@ public class ShopLogger implements ClientModInitializer {
         String item;
         int stockSpace;
         double price;
-        String action;   // SELLING / BUYING
+        String action;
         String status;
         String timestamp;
 
@@ -197,7 +197,7 @@ public class ShopLogger implements ClientModInitializer {
                     }
                 }
             } catch (IOException e) {
-                System.err.println("[SunnyMod] Error reading: " + e.getMessage());
+                System.err.println("[SunnyMod] Error reading shop data: " + e.getMessage());
                 return;
             }
         } else {
@@ -212,7 +212,7 @@ public class ShopLogger implements ClientModInitializer {
                 writer.newLine();
             }
         } catch (IOException e) {
-            System.err.println("[SunnyMod] Error writing: " + e.getMessage());
+            System.err.println("[SunnyMod] Error writing shop data: " + e.getMessage());
             if (Config.get().showShopSaveFailed()) {
                 MinecraftClient.getInstance().player.sendMessage(Text.literal("§c[Shop] Failed to save shop data!"), false);
             }
@@ -221,6 +221,9 @@ public class ShopLogger implements ClientModInitializer {
 
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
+
+        // Update Sign HUD
+        ShopSignHud.updateLastShop(newData);
 
         if (isUpdate && Config.get().showShopUpdated()) {
             sendDetailedUpdateFeedback(client, oldData, newData);
