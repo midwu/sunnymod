@@ -60,7 +60,7 @@ public class FishingLogger implements ClientModInitializer {
         BAIT_NORMALIZE.put("legendary lure", "Legendary Lure");
     }
 
-    // Patterns (unchanged)
+    // Patterns
     private static final Pattern CONTEST_START = Pattern.compile("\\[EvenMoreFish\\] A fishing contest for the largest fish has started\\.");
     private static final Pattern CONTEST_END = Pattern.compile("\\[EvenMoreFish\\] The fishing contest has ended\\.");
     private static final Pattern ANY_FISH = Pattern.compile("^(\\w+) has fished a (\\d+\\.\\d+)cm (.+)!$");
@@ -124,6 +124,7 @@ public class FishingLogger implements ClientModInitializer {
             case 3 -> { prizeCash = 15000; prizeClaimblocks = 1000; }
             case 4 -> { prizeCash = 0; prizeClaimblocks = 500; }
         }
+        debugLog("Prize applied: Rank " + rank + " | Cash=" + prizeCash + " | Key=" + keyString);
     }
 
     private void sendExportedFeedback(String message) {
@@ -184,20 +185,44 @@ public class FishingLogger implements ClientModInitializer {
             String playerName = getPlayerName();
             Matcher m;
 
+            // Leaderboard position
             if ((m = LEADERBOARD_ENTRY.matcher(text)).find()) {
                 int pos = Integer.parseInt(m.group(1));
                 String who = m.group(2);
                 if (who.equalsIgnoreCase(playerName)) playerRank = pos;
                 return;
             }
-            if (TOTAL_PLAYERS.matcher(text).find() ||
-                    PRIZE_1ST.matcher(text).find() ||
-                    PRIZE_2ND.matcher(text).find() ||
-                    PRIZE_3RD.matcher(text).find() ||
-                    PRIZE_PARTICIPATION.matcher(text).find()) {
+
+            // ── Prize detection (FIXED) ─────────────────────────────────
+            Matcher prizeMatcher;
+            if ((prizeMatcher = PRIZE_1ST.matcher(text)).find()) {
+                String key = prizeMatcher.group(1);
+                applyPrize(1, key);
                 lastSaleTime = System.currentTimeMillis();
                 return;
             }
+            if ((prizeMatcher = PRIZE_2ND.matcher(text)).find()) {
+                applyPrize(2, "");
+                lastSaleTime = System.currentTimeMillis();
+                return;
+            }
+            if ((prizeMatcher = PRIZE_3RD.matcher(text)).find()) {
+                applyPrize(3, "");
+                lastSaleTime = System.currentTimeMillis();
+                return;
+            }
+            if (PRIZE_PARTICIPATION.matcher(text).find()) {
+                applyPrize(4, "");
+                lastSaleTime = System.currentTimeMillis();
+                return;
+            }
+
+            // Other contest messages
+            if (TOTAL_PLAYERS.matcher(text).find()) {
+                lastSaleTime = System.currentTimeMillis();
+            }
+
+            // Fish sold (outside contest)
             if (trackingSales && (m = FISH_SOLD.matcher(text)).find()) {
                 int count = Integer.parseInt(m.group(1));
                 double amount = Double.parseDouble(m.group(2).replace(",", ""));
@@ -207,8 +232,10 @@ public class FishingLogger implements ClientModInitializer {
                 if (!contestActive && !exportedAlready) exportToCSV();
                 return;
             }
+
             if (!contestActive) return;
 
+            // Fish caught during contest
             if ((m = ANY_FISH.matcher(text)).find()) {
                 String catcher = m.group(1);
                 double size = Double.parseDouble(m.group(2));
@@ -222,6 +249,7 @@ public class FishingLogger implements ClientModInitializer {
                 }
                 return;
             }
+
             if ((m = BAIT_CAUGHT.matcher(text)).find()) {
                 String catcher = m.group(1);
                 if (catcher.equalsIgnoreCase(playerName)) {
@@ -230,6 +258,8 @@ public class FishingLogger implements ClientModInitializer {
             }
         });
     }
+
+    // ... (rest of the file unchanged: getStaticHeaders, exportToCSV, escapeCsv, formatNumber, resetContestData, debugLog)
 
     private static List<String> getStaticHeaders() {
         return List.of(
@@ -301,7 +331,6 @@ public class FishingLogger implements ClientModInitializer {
         }
     }
 
-    /** Improved CSV escaping + forces dot as decimal separator */
     private String escapeCsv(String value) {
         if (value == null || value.isEmpty()) return "N/A";
         value = value.replace("\n", " ").replace("\r", " ").trim();
@@ -311,7 +340,6 @@ public class FishingLogger implements ClientModInitializer {
         return value;
     }
 
-    /** Always uses dot as decimal separator, no thousands separator */
     private String formatNumber(double number) {
         return String.format(Locale.US, "%.2f", number);
     }

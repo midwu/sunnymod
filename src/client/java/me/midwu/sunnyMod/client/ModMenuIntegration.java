@@ -42,7 +42,7 @@ public class ModMenuIntegration implements ModMenuApi {
         features.addEntry(eb.startBooleanToggle(
                         Text.literal("Shop Logger"),
                         cfg.shopLoggerEnabled)
-                .setDefaultValue(true)
+                .setDefaultValue(false)
                 .setTooltip(Text.literal("Enable/disable the shop logging system"))
                 .setSaveConsumer(v -> cfg.shopLoggerEnabled = v)
                 .build());
@@ -66,9 +66,7 @@ public class ModMenuIntegration implements ModMenuApi {
         // ── Feedback ──────────────────────────────────────────────────────────
         ConfigCategory feedback = builder.getOrCreateCategory(Text.literal("Feedback"));
 
-        feedback.addEntry(eb.startTextDescription(
-                        Text.literal("§7Shop Logger messages"))
-                .build());
+        feedback.addEntry(eb.startTextDescription(Text.literal("§eShop Logger messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Shop: Added"),
@@ -110,9 +108,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackWarpSet = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(
-                        Text.literal("§7Earnings Detector messages"))
-                .build());
+        feedback.addEntry(eb.startTextDescription(Text.literal("§eEarnings Detector messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Earnings: Per Sale"),
@@ -122,9 +118,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackEarningsPerSale = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(
-                        Text.literal("§7Fishing Logger messages"))
-                .build());
+        feedback.addEntry(eb.startTextDescription(Text.literal("§eFishing Logger messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Fishing: Exported to CSV"),
@@ -142,9 +136,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackFishingFailed = v)
                 .build());
 
-        feedback.addEntry(eb.startTextDescription(
-                        Text.literal("§7Command messages"))
-                .build());
+        feedback.addEntry(eb.startTextDescription(Text.literal("§eCommand messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Command: Earnings Reset"),
@@ -229,22 +221,6 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.timeOffset = v)
                 .build());
 
-        fishing.addEntry(eb.startStrField(
-                        Text.literal("Fishing Method"),
-                        cfg.fishingMethod)
-                .setDefaultValue("")
-                .setTooltip(Text.literal("Your fishing method (e.g. AFK, manual). Saved to CSV."))
-                .setSaveConsumer(v -> cfg.fishingMethod = v)
-                .build());
-
-        fishing.addEntry(eb.startStrField(
-                        Text.literal("Fishing Rod"),
-                        cfg.fishingRod)
-                .setDefaultValue("")
-                .setTooltip(Text.literal("Your fishing rod name. Saved to CSV."))
-                .setSaveConsumer(v -> cfg.fishingRod = v)
-                .build());
-
         // ── Resets ────────────────────────────────────────────────────────────
         ConfigCategory resets = builder.getOrCreateCategory(Text.literal("Resets"));
 
@@ -264,7 +240,7 @@ public class ModMenuIntegration implements ModMenuApi {
                         Text.literal("Reset HUD Positions (toggle to confirm)"),
                         false)
                 .setDefaultValue(false)
-                .setTooltip(Text.literal("Toggle ON and save to reset all HUD panel positions to defaults"))
+                .setTooltip(Text.literal("Toggle ON and save to reset all panel positions to defaults"))
                 .setSaveConsumer(v -> { if (v) cfg.resetHudDefaults(); })
                 .build());
 
