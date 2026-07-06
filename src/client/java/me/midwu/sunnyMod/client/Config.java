@@ -16,7 +16,7 @@ public class Config {
             FabricLoader.getInstance().getConfigDir().resolve("sunnymod-config.json");
 
     // ── Feature toggles ───────────────────────────────────────────────────────
-    public boolean shopLoggerEnabled       = true;
+    public boolean shopLoggerEnabled       = false; // disabled by default
     public boolean earningsDetectorEnabled = true;
     public boolean fishingLoggerEnabled    = true;
 
@@ -26,11 +26,11 @@ public class Config {
     // ── Individual feedback toggles ───────────────────────────────────────────
 
     // ShopLogger
-    public boolean feedbackShopAdded       = true;
-    public boolean feedbackShopUpdated     = true;
-    public boolean feedbackShopNotSign     = true;
-    public boolean feedbackShopSaveFailed  = true;
-    public boolean feedbackWarpSet         = true;
+    public boolean feedbackShopAdded      = true;
+    public boolean feedbackShopUpdated    = true;
+    public boolean feedbackShopNotSign    = true;
+    public boolean feedbackShopSaveFailed = true;
+    public boolean feedbackWarpSet        = true;
 
     // EarningsDetector
     public boolean feedbackEarningsPerSale = true;
@@ -40,8 +40,8 @@ public class Config {
     public boolean feedbackFishingFailed   = true;
 
     // Commands
-    public boolean feedbackEarningsReset   = true;
-    public boolean feedbackFishingOffset   = true;
+    public boolean feedbackEarningsReset = true;
+    public boolean feedbackFishingOffset = true;
 
     // ── HUD panel positions ───────────────────────────────────────────────────
     public int fishingX  = 6;
@@ -115,17 +115,10 @@ public class Config {
         panelOrder = Arrays.asList("fishing", "earnings", "shop");
     }
 
-    public long earningsHideDelayMs() {
-        return (long) earningsHideDelayMinutes * 60 * 1000L;
-    }
-
-    public long shopHideDelayMs() {
-        return (long) shopHideDelayMinutes * 60 * 1000L;
-    }
+    public long earningsHideDelayMs() { return (long) earningsHideDelayMinutes * 60 * 1000L; }
+    public long shopHideDelayMs()     { return (long) shopHideDelayMinutes     * 60 * 1000L; }
 
     // ── Feedback helpers ──────────────────────────────────────────────────────
-    // Each returns true only if both the master switch AND the individual toggle are on
-
     public boolean showShopAdded()       { return feedbackMessages && feedbackShopAdded; }
     public boolean showShopUpdated()     { return feedbackMessages && feedbackShopUpdated; }
     public boolean showShopNotSign()     { return feedbackMessages && feedbackShopNotSign; }

@@ -16,10 +16,10 @@ public class HudEditScreen extends Screen {
     private static final int BAR_HEIGHT  = 24;
     private static final int CHECK_SIZE  = 8;
 
-    private String draggingPanel = null;
-    private double dragOffsetX   = 0;
-    private double dragOffsetY   = 0;
-    private boolean wasPressed   = false;
+    private String  draggingPanel = null;
+    private double  dragOffsetX   = 0;
+    private double  dragOffsetY   = 0;
+    private boolean wasPressed    = false;
 
     public HudEditScreen() {
         super(Text.literal("Edit HUD"));
@@ -49,7 +49,8 @@ public class HudEditScreen extends Screen {
                     int px = getPanelX(cfg, panel);
                     int py = getPanelY(cfg, panel);
                     int ph = getPanelHeight(panel);
-                    if (mouseX >= px && mouseX <= px + PANEL_WIDTH && mouseY >= py && mouseY <= py + ph) {
+                    if (mouseX >= px && mouseX <= px + PANEL_WIDTH
+                            && mouseY >= py && mouseY <= py + ph) {
                         draggingPanel = panel;
                         dragOffsetX   = mouseX - px;
                         dragOffsetY   = mouseY - py;
@@ -64,13 +65,14 @@ public class HudEditScreen extends Screen {
 
         if (draggingPanel != null && pressed) {
             int newX = (int) Math.clamp(mouseX - dragOffsetX, 0, this.width - PANEL_WIDTH);
-            int newY = (int) Math.clamp(mouseY - dragOffsetY, 0, this.height - BAR_HEIGHT - getPanelHeight(draggingPanel));
+            int newY = (int) Math.clamp(mouseY - dragOffsetY, 0,
+                    this.height - BAR_HEIGHT - getPanelHeight(draggingPanel));
             newX = snapX(cfg, draggingPanel, newX);
             newY = snapY(cfg, draggingPanel, newY);
             setPanelPos(cfg, draggingPanel, newX, newY);
         }
 
-        // Draw panels
+        // ── Draw panels ───────────────────────────────────────────────────────
         int gold = 0xFFFFD700;
         for (String panel : cfg.panelOrder) {
             boolean visible = isPanelVisible(cfg, panel);
@@ -78,7 +80,9 @@ public class HudEditScreen extends Screen {
             int py = getPanelY(cfg, panel);
             int ph = getPanelHeight(panel);
 
-            context.fill(px, py, px + PANEL_WIDTH, py + ph, visible ? 0xBB000000 : 0x55000000);
+            context.fill(px, py, px + PANEL_WIDTH, py + ph,
+                    visible ? 0xBB000000 : 0x55000000);
+
             int borderColor = panel.equals(draggingPanel) ? 0xFFFFFFFF : gold;
             context.fill(px, py, px + PANEL_WIDTH, py + 1, borderColor);
             context.fill(px, py + ph - 1, px + PANEL_WIDTH, py + ph, borderColor);
@@ -87,12 +91,12 @@ public class HudEditScreen extends Screen {
 
             String label = panel.substring(0, 1).toUpperCase() + panel.substring(1) + " HUD";
             if (!visible) label += " (hidden)";
-            context.drawTextWithShadow(this.textRenderer, Text.literal(label),
+            context.drawText(this.textRenderer, label,
                     px + (PANEL_WIDTH - this.textRenderer.getWidth(label)) / 2,
-                    py + ph / 2 - 4, gold);
+                    py + ph / 2 - 4, gold, true);
         }
 
-        // Bottom bar
+        // ── Bottom bar ────────────────────────────────────────────────────────
         int barY = this.height - BAR_HEIGHT;
         context.fill(0, barY, this.width, this.height, 0xDD000000);
 
@@ -107,10 +111,13 @@ public class HudEditScreen extends Screen {
 
             context.fill(cx, cy, cx + CHECK_SIZE, cy + CHECK_SIZE, 0xFF888888);
             if (visible)
-                context.fill(cx + 2, cy + 2, cx + CHECK_SIZE - 2, cy + CHECK_SIZE - 2, 0xFFFFD700);
+                context.fill(cx + 2, cy + 2,
+                        cx + CHECK_SIZE - 2, cy + CHECK_SIZE - 2, 0xFFFFD700);
 
-            context.drawTextWithShadow(this.textRenderer, Text.literal(labels[i]),
-                    cx + CHECK_SIZE + 3, barY + (BAR_HEIGHT - 8) / 2, 0xFFFFFFFF);
+            context.drawText(this.textRenderer, labels[i],
+                    cx + CHECK_SIZE + 3,
+                    barY + (BAR_HEIGHT - 8) / 2,
+                    0xFFFFFFFF, true);
 
             startX += CHECK_SIZE + this.textRenderer.getWidth(labels[i]) + 20;
         }
@@ -122,18 +129,21 @@ public class HudEditScreen extends Screen {
                 && mouseY >= resetY && mouseY <= resetY + 10;
         context.fill(resetX, resetY, resetX + 80, resetY + 10,
                 resetHovered ? 0xAAFF4444 : 0x88FF4444);
-        context.drawTextWithShadow(this.textRenderer, Text.literal("Reset Positions"),
+        context.drawText(this.textRenderer, "Reset Positions",
                 resetX + (80 - this.textRenderer.getWidth("Reset Positions")) / 2,
-                resetY + 1, 0xFFFFFFFF);
+                resetY + 1, 0xFFFFFFFF, true);
 
         // Hint
         String hint = "Drag panels  •  H / Esc to save & close";
-        context.drawTextWithShadow(this.textRenderer, Text.literal(hint),
+        context.drawText(this.textRenderer, hint,
                 this.width - this.textRenderer.getWidth(hint) - 10,
-                barY + (BAR_HEIGHT - 8) / 2, 0xFFAAAAAA);
+                barY + (BAR_HEIGHT - 8) / 2,
+                0xFFAAAAAA, true);
 
         super.render(context, mouseX, mouseY, delta);
     }
+
+    // ── Click handlers ────────────────────────────────────────────────────────
 
     private void handleCheckboxClick(int mouseX, int mouseY, Config cfg) {
         int barY = this.height - BAR_HEIGHT;
@@ -148,7 +158,8 @@ public class HudEditScreen extends Screen {
             int cy     = barY + (BAR_HEIGHT - CHECK_SIZE) / 2;
             int totalW = CHECK_SIZE + 3 + this.textRenderer.getWidth(labels[i]);
 
-            if (mouseX >= cx && mouseX <= cx + totalW && mouseY >= cy && mouseY <= cy + CHECK_SIZE) {
+            if (mouseX >= cx && mouseX <= cx + totalW
+                    && mouseY >= cy && mouseY <= cy + CHECK_SIZE) {
                 toggleVisibility(cfg, panels[i]);
                 break;
             }
@@ -174,10 +185,13 @@ public class HudEditScreen extends Screen {
         }
     }
 
+    // ── Snap logic ────────────────────────────────────────────────────────────
+
     private int snapX(Config cfg, String moving, int newX) {
         for (String other : cfg.panelOrder) {
             if (other.equals(moving)) continue;
-            if (Math.abs(newX - getPanelX(cfg, other)) < SNAP_DIST) return getPanelX(cfg, other);
+            if (Math.abs(newX - getPanelX(cfg, other)) < SNAP_DIST)
+                return getPanelX(cfg, other);
         }
         return newX;
     }
@@ -193,6 +207,8 @@ public class HudEditScreen extends Screen {
         }
         return newY;
     }
+
+    // ── Panel accessors ───────────────────────────────────────────────────────
 
     private int getPanelX(Config cfg, String panel) {
         return switch (panel) {
@@ -237,6 +253,8 @@ public class HudEditScreen extends Screen {
             case "shop"     -> { cfg.shopX     = x; cfg.shopY     = y; }
         }
     }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
     public void close() {
