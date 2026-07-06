@@ -124,7 +124,7 @@ public class FishingLogger implements ClientModInitializer {
             case 3 -> { prizeCash = 15000; prizeClaimblocks = 1000; }
             case 4 -> { prizeCash = 0; prizeClaimblocks = 500; }
         }
-        debugLog("Prize applied: Rank " + rank + " | Cash=" + prizeCash + " | Key=" + keyString);
+        debugLog("Prize applied: Rank " + rank + " | Cash=" + prizeCash);
     }
 
     private void sendExportedFeedback(String message) {
@@ -185,7 +185,6 @@ public class FishingLogger implements ClientModInitializer {
             String playerName = getPlayerName();
             Matcher m;
 
-            // Leaderboard position
             if ((m = LEADERBOARD_ENTRY.matcher(text)).find()) {
                 int pos = Integer.parseInt(m.group(1));
                 String who = m.group(2);
@@ -193,11 +192,10 @@ public class FishingLogger implements ClientModInitializer {
                 return;
             }
 
-            // ── Prize detection (FIXED) ─────────────────────────────────
+            // Prize detection (FIXED)
             Matcher prizeMatcher;
             if ((prizeMatcher = PRIZE_1ST.matcher(text)).find()) {
-                String key = prizeMatcher.group(1);
-                applyPrize(1, key);
+                applyPrize(1, prizeMatcher.group(1));
                 lastSaleTime = System.currentTimeMillis();
                 return;
             }
@@ -217,12 +215,10 @@ public class FishingLogger implements ClientModInitializer {
                 return;
             }
 
-            // Other contest messages
             if (TOTAL_PLAYERS.matcher(text).find()) {
                 lastSaleTime = System.currentTimeMillis();
             }
 
-            // Fish sold (outside contest)
             if (trackingSales && (m = FISH_SOLD.matcher(text)).find()) {
                 int count = Integer.parseInt(m.group(1));
                 double amount = Double.parseDouble(m.group(2).replace(",", ""));
@@ -235,7 +231,6 @@ public class FishingLogger implements ClientModInitializer {
 
             if (!contestActive) return;
 
-            // Fish caught during contest
             if ((m = ANY_FISH.matcher(text)).find()) {
                 String catcher = m.group(1);
                 double size = Double.parseDouble(m.group(2));
@@ -258,8 +253,6 @@ public class FishingLogger implements ClientModInitializer {
             }
         });
     }
-
-    // ... (rest of the file unchanged: getStaticHeaders, exportToCSV, escapeCsv, formatNumber, resetContestData, debugLog)
 
     private static List<String> getStaticHeaders() {
         return List.of(
