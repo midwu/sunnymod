@@ -27,66 +27,57 @@ public class ShopLogger implements ClientModInitializer {
 
     private static final Path CONFIG_DIR = FabricLoader.getInstance().getConfigDir().resolve("sunnyMod");
     private static final Path CSV_FILE   = CONFIG_DIR.resolve("shop_data.csv");
-    private static final DateTimeFormatter TIMESTAMP_FORMAT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     private static final StringBuilder messageBuffer = new StringBuilder();
-    private static boolean isBuffering     = false;
-    private static long    bufferStartTime = 0L;
+    private static boolean isBuffering = false;
+    private static long bufferStartTime = 0L;
     private static final long BUFFER_TIMEOUT_MS = 5_000L;
 
-    // ── Warp tracking ─────────────────────────────────────────────────────────
-    private static String currentWarp      = "";
-    private static String previousWarp     = "";
-    private static long   lastWarpActionTime = 0L;
+    // Warp tracking
+    private static String currentWarp = "";
+    private static String previousWarp = "";
+    private static long lastWarpActionTime = 0L;
 
-    // ── Public accessors ──────────────────────────────────────────────────────
-    public static String getLastWarp()           { return currentWarp; }
-    public static Path   getConfigDir()          { return CONFIG_DIR; }
-    public static long   getLastWarpActionTime() { return lastWarpActionTime; }
+    public static String getLastWarp() { return currentWarp; }
+    public static Path getConfigDir() { return CONFIG_DIR; }
+    public static long getLastWarpActionTime() { return lastWarpActionTime; }
 
     public static void pushWarp(String newWarp) {
-        previousWarp       = currentWarp;
-        currentWarp        = newWarp;
+        previousWarp = currentWarp;
+        currentWarp = newWarp;
         lastWarpActionTime = System.currentTimeMillis();
-        debugLog("Warp updated: " + currentWarp + " (prev: " + previousWarp + ")");
     }
 
     public static void swapWarps() {
         if (previousWarp.startsWith("/warp ")) {
-            String temp    = currentWarp;
-            currentWarp    = previousWarp;
-            previousWarp   = temp;
+            String temp = currentWarp;
+            currentWarp = previousWarp;
+            previousWarp = temp;
             lastWarpActionTime = System.currentTimeMillis();
-            debugLog("Warps swapped: current=" + currentWarp + " prev=" + previousWarp);
-        } else {
-            debugLog("/back confirmed but previous was not a /warp — not swapping");
         }
     }
 
-    // ── Shop data (private, only used internally) ─────────────────────────────
-    private static class ShopData {
+    static class ShopData {
         String shopLocation;
-        String shopOwner  = "";
-        String item       = "";
-        int    stockSpace = 0;
-        double price      = 0;
-        String action     = "UNKNOWN";
-        String status     = "Active";
+        String shopOwner;
+        String item;
+        int stockSpace;
+        double price;
+        String action;
+        String status;
         String timestamp;
 
         public String toCsvLine() {
-            String priceStr = (price == (int) price)
-                    ? String.valueOf((int) price)
-                    : String.valueOf(price);
-            return shopLocation         + "," +
+            String priceStr = (price == (int) price) ? String.valueOf((int) price) : String.valueOf(price);
+            return shopLocation + "," +
                     escapeCsv(shopOwner) + "," +
-                    escapeCsv(item)      + "," +
-                    stockSpace           + "," +
-                    priceStr             + "," +
-                    action               + "," +
-                    status               + "," +
-                    timestamp            + "," +
+                    escapeCsv(item) + "," +
+                    stockSpace + "," +
+                    priceStr + "," +
+                    action + "," +
+                    status + "," +
+                    timestamp + "," +
                     escapeCsv(currentWarp);
         }
 
@@ -97,8 +88,6 @@ public class ShopLogger implements ClientModInitializer {
             return value;
         }
     }
-
-    // ── Initialise ────────────────────────────────────────────────────────────
 
     @Override
     public void onInitializeClient() {
@@ -113,17 +102,8 @@ public class ShopLogger implements ClientModInitializer {
 
             String text = message.getString().replaceAll("§[0-9a-fA-F]", "");
 
-            // Clear stuck buffer
-            if (isBuffering && (System.currentTimeMillis() - bufferStartTime) > BUFFER_TIMEOUT_MS) {
-                debugLog("Buffer timed out, clearing.");
-                isBuffering = false;
-                messageBuffer.setLength(0);
-            }
-
-            if (!isBuffering && (text.startsWith("+") || text.startsWith("|")
-                    || text.contains("Shop Information:"))) {
-                debugLog("Starting to buffer shop message");
-                isBuffering     = true;
+            if (!isBuffering && (text.startsWith("+") || text.startsWith("|") || text.contains("Shop Information:"))) {
+                isBuffering = true;
                 bufferStartTime = System.currentTimeMillis();
                 messageBuffer.setLength(0);
             }
@@ -138,109 +118,71 @@ public class ShopLogger implements ClientModInitializer {
         });
     }
 
-    // ── Processing ────────────────────────────────────────────────────────────
-
     private void processBufferedMessage() {
-        if (messageBuffer.isEmpty()) { isBuffering = false; return; }
+        if (messageBuffer.isEmpty()) {
+            isBuffering = false;
+            return;
+        }
 
         String fullMessage = messageBuffer.toString();
-        debugLog("Processing:\n" + fullMessage);
         messageBuffer.setLength(0);
         isBuffering = false;
 
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player == null || client.world == null) return;
+        if (client.player == null) return;
 
         HitResult hitResult = client.crosshairTarget;
-        if (hitResult == null || hitResult.getType() != HitResult.Type.BLOCK) {
-            debugLog("Not looking at a block, skipping");
-            return;
-        }
+        if (hitResult == null || hitResult.getType() != HitResult.Type.BLOCK) return;
 
-        BlockPos pos   = ((BlockHitResult) hitResult).getBlockPos();
-        Block    block = client.world.getBlockState(pos).getBlock();
+        BlockPos pos = ((BlockHitResult) hitResult).getBlockPos();
+        Block block = client.world != null ? client.world.getBlockState(pos).getBlock() : null;
 
         if (block != Blocks.OAK_WALL_SIGN) {
-            debugLog("Not an oak wall sign: " + block);
             if (Config.get().showShopNotSign()) {
-                client.player.sendMessage(Text.literal(
-                        "§e[Shop] Not looking at a sign — shop not logged. " +
-                                "Right-click the sign to log this shop."), false);
+                client.player.sendMessage(Text.literal("§e[Shop] Not looking at a sign — shop not logged."), false);
             }
             return;
         }
 
-        ShopData shopData = parseShopMessage(fullMessage);
-        if (shopData != null) {
-            shopData.shopLocation = String.format("%d %d %d",
-                    pos.getX(), pos.getY(), pos.getZ());
-            shopData.timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
-            debugLog("Parsed shop at " + shopData.shopLocation + " | Warp=" + currentWarp);
-            saveShopData(shopData);
+        ShopData newData = parseShopMessage(fullMessage);
+        if (newData != null) {
+            newData.shopLocation = String.format("%d %d %d", pos.getX(), pos.getY(), pos.getZ());
+            newData.timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
+
+            ShopData oldData = findExistingShop(newData.shopLocation);
+            saveShopData(newData, oldData);
+
             lastWarpActionTime = System.currentTimeMillis();
-
-            // Update the sign HUD with the latest shop info
-            ShopSignHud.updateLastShop(new LastShopInfo(
-                    shopData.shopOwner,
-                    shopData.item,
-                    shopData.stockSpace,
-                    shopData.price,
-                    shopData.action,
-                    shopData.status
-            ));
         }
     }
 
-    private ShopData parseShopMessage(String message) {
-        if (!message.contains("| Owner:")    && !message.contains("| Item:") &&
-                !message.contains("| Stock:") && !message.contains("| Space:") &&
-                !message.contains("| Price per")) return null;
-
-        ShopData data = new ShopData();
-
-        for (String line : message.split("\n")) {
-            line = line.trim();
-            if (line.isEmpty()
-                    || (line.startsWith("+") && !line.contains("Enter in chat"))
-                    || (line.startsWith("|") && line.length() <= 1)) continue;
-
-            if (line.startsWith("| Owner: ")) {
-                data.shopOwner = line.substring("| Owner: ".length()).trim();
-            } else if (line.startsWith("| Item: ")) {
-                String itemLine  = line.substring("| Item: ".length()).trim();
-                int previewIndex = itemLine.indexOf("[Item Preview]");
-                data.item = previewIndex != -1
-                        ? itemLine.substring(0, previewIndex).trim()
-                        : itemLine;
-            } else if (line.startsWith("| Stock: ")) {
-                data.stockSpace = parseIntSafely(line.substring("| Stock: ".length()).trim(), 0);
-            } else if (line.startsWith("| Space: ")) {
-                data.stockSpace = parseIntSafely(line.substring("| Space: ".length()).trim(), 0);
-            } else if (line.startsWith("| Price per ")) {
-                String[] priceSplit = line.substring("| Price per ".length()).trim().split("- \\$");
-                if (priceSplit.length >= 2)
-                    data.price = parseDoubleSafely(priceSplit[1].replace(",", ""), 0.0);
-            } else if (line.contains("This shop is SELLING"))          data.action = "SELLING";
-            else if (line.contains("This shop is BUYING"))             data.action = "BUYING";
-            else if (line.contains("This shop has run out of space"))  data.status = "out of space";
-            else if (line.contains("This shop has run out of stock"))  data.status = "out of stock";
-        }
-
-        if (data.stockSpace == 0) {
-            if ("SELLING".equals(data.action) && !"out of stock".equals(data.status))
-                data.status = "out of stock";
-            else if ("BUYING".equals(data.action) && !"out of space".equals(data.status))
-                data.status = "out of space";
-        }
-
-        return data;
+    private ShopData findExistingShop(String location) {
+        if (!Files.exists(CSV_FILE)) return null;
+        try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {
+            String line;
+            reader.readLine(); // header
+            while ((line = reader.readLine()) != null) {
+                if (line.startsWith(location + ",")) {
+                    String[] parts = line.split(",", -1);
+                    ShopData data = new ShopData();
+                    data.shopLocation = parts[0];
+                    data.shopOwner = parts[1].replace("\"", "");
+                    data.item = parts[2].replace("\"", "");
+                    data.stockSpace = parseIntSafely(parts[3], 0);
+                    data.price = parseDoubleSafely(parts[4], 0.0);
+                    data.action = parts[5];
+                    data.status = parts[6];
+                    return data;
+                }
+            }
+        } catch (Exception ignored) {}
+        return null;
     }
 
-    private void saveShopData(ShopData newData) {
+    private void saveShopData(ShopData newData, ShopData oldData) {
+        boolean isUpdate = oldData != null;
         List<String> lines = new ArrayList<>();
-        boolean found  = false;
-        boolean update = false;
-        String  header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp";
+        String header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp";
 
         if (Files.exists(CSV_FILE)) {
             try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {
@@ -248,13 +190,8 @@ public class ShopLogger implements ClientModInitializer {
                 boolean isHeader = true;
                 while ((line = reader.readLine()) != null) {
                     if (isHeader) { lines.add(header); isHeader = false; continue; }
-                    int firstComma = line.indexOf(',');
-                    String existingLocation = firstComma != -1
-                            ? line.substring(0, firstComma) : line;
-                    if (existingLocation.equals(newData.shopLocation)) {
+                    if (line.startsWith(newData.shopLocation + ",")) {
                         lines.add(newData.toCsvLine());
-                        found  = true;
-                        update = true;
                     } else {
                         lines.add(line);
                     }
@@ -267,38 +204,114 @@ public class ShopLogger implements ClientModInitializer {
             lines.add(header);
         }
 
-        if (!found) lines.add(newData.toCsvLine());
+        if (!isUpdate) lines.add(newData.toCsvLine());
 
         try (BufferedWriter writer = Files.newBufferedWriter(CSV_FILE)) {
-            for (String line : lines) { writer.write(line); writer.newLine(); }
+            for (String line : lines) {
+                writer.write(line);
+                writer.newLine();
+            }
         } catch (IOException e) {
             System.err.println("[SunnyMod] Error writing shop data: " + e.getMessage());
             if (Config.get().showShopSaveFailed()) {
-                MinecraftClient client = MinecraftClient.getInstance();
-                if (client.player != null)
-                    client.player.sendMessage(
-                            Text.literal("§c[Shop] Failed to save shop data!"), false);
+                MinecraftClient.getInstance().player.sendMessage(Text.literal("§c[Shop] Failed to save shop data!"), false);
             }
             return;
         }
 
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.player != null) {
-            if (update && Config.get().showShopUpdated()) {
-                client.player.sendMessage(Text.literal(
-                        "§a[Shop] Updated: §f" + newData.item +
-                                " §7(" + newData.action + " $" + (int) newData.price + ")"), false);
-            } else if (!update && Config.get().showShopAdded()) {
-                client.player.sendMessage(Text.literal(
-                        "§a[Shop] Added: §f" + newData.item +
-                                " §7(" + newData.action + " $" + (int) newData.price + ")"), false);
-            }
+        if (client.player == null) return;
+
+        // Convert to LastShopInfo for HUD
+        LastShopInfo info = new LastShopInfo(
+                newData.shopOwner,
+                newData.item,
+                newData.stockSpace,
+                newData.price,
+                newData.action,
+                newData.timestamp
+        );
+        ShopSignHud.updateLastShop(info);
+
+        if (isUpdate && Config.get().showShopUpdated()) {
+            sendDetailedUpdateFeedback(client, oldData, newData);
+        } else if (!isUpdate && Config.get().showShopAdded()) {
+            client.player.sendMessage(Text.literal("§a[Shop] Added: §f" + newData.item + " §7(" + newData.action + " $" + (int)newData.price + ")"), false);
         }
     }
 
-    // ── Util ──────────────────────────────────────────────────────────────────
+    private void sendDetailedUpdateFeedback(MinecraftClient client, ShopData oldData, ShopData newData) {
+        StringBuilder msg = new StringBuilder("§a[Shop] Updated: §f");
 
-    private int    parseIntSafely(String v, int d)       { try { return Integer.parseInt(v); }   catch (Exception e) { return d; } }
-    private double parseDoubleSafely(String v, double d) { try { return Double.parseDouble(v); } catch (Exception e) { return d; } }
-    private static void debugLog(String msg)             { if (DEBUG) System.out.println("[ShopLogger DEBUG] " + msg); }
+        List<String> changes = new ArrayList<>();
+
+        if (!oldData.item.equals(newData.item)) {
+            changes.add(oldData.item + " §7→ §f" + newData.item);
+        }
+        if (Math.abs(oldData.price - newData.price) > 0.01) {
+            changes.add("$" + (int)oldData.price + " §7→ §a$" + (int)newData.price);
+        }
+        if (oldData.stockSpace != newData.stockSpace) {
+            changes.add("Stock: " + oldData.stockSpace + " §7→ §f" + newData.stockSpace);
+        }
+        if (!oldData.shopOwner.equals(newData.shopOwner)) {
+            changes.add("Owner: " + oldData.shopOwner + " §7→ §f" + newData.shopOwner);
+        }
+        if (!oldData.action.equals(newData.action)) {
+            changes.add("Action: " + oldData.action + " §7→ §f" + newData.action);
+        }
+
+        if (changes.isEmpty()) {
+            msg.append(newData.item).append(" §7(no visible change)");
+        } else {
+            msg.append(String.join(" §7| ", changes));
+        }
+
+        client.player.sendMessage(Text.literal(msg.toString()), false);
+    }
+
+    private ShopData parseShopMessage(String message) {
+        ShopData data = new ShopData();
+
+        for (String line : message.split("\n")) {
+            line = line.trim();
+            if (line.isEmpty() || (line.startsWith("+") && !line.contains("Enter in chat")) ||
+                    (line.startsWith("|") && line.length() <= 1)) continue;
+
+            if (line.startsWith("| Owner: ")) {
+                data.shopOwner = line.substring("| Owner: ".length()).trim();
+            } else if (line.startsWith("| Item: ")) {
+                String itemLine = line.substring("| Item: ".length()).trim();
+                int idx = itemLine.indexOf("[Item Preview]");
+                data.item = (idx != -1) ? itemLine.substring(0, idx).trim() : itemLine;
+            } else if (line.startsWith("| Stock: ") || line.startsWith("| Space: ")) {
+                data.stockSpace = parseIntSafely(line.substring(line.indexOf(":") + 1).trim(), 0);
+            } else if (line.startsWith("| Price per ")) {
+                String[] split = line.substring("| Price per ".length()).trim().split("- \\$");
+                if (split.length >= 2) data.price = parseDoubleSafely(split[1].replace(",", ""), 0.0);
+            } else if (line.contains("This shop is SELLING")) data.action = "SELLING";
+            else if (line.contains("This shop is BUYING")) data.action = "BUYING";
+            else if (line.contains("run out of space")) data.status = "out of space";
+            else if (line.contains("run out of stock")) data.status = "out of stock";
+        }
+
+        if (data.action == null) data.action = "UNKNOWN";
+        if (data.status == null) data.status = "Active";
+        if (data.shopOwner == null) data.shopOwner = "";
+        if (data.item == null) data.item = "";
+
+        return data;
+    }
+
+    private int parseIntSafely(String s, int def) {
+        try { return Integer.parseInt(s.replace(",", "")); } catch (Exception e) { return def; }
+    }
+
+    private double parseDoubleSafely(String s, double def) {
+        try { return Double.parseDouble(s.replace(",", "")); } catch (Exception e) { return def; }
+    }
+
+    private static void debugLog(String message) {
+        if (DEBUG) System.out.println("[ShopLogger DEBUG] " + message);
+    }
 }
