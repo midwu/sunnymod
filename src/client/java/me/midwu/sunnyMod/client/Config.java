@@ -24,24 +24,16 @@ public class Config {
     public boolean feedbackMessages = true;
 
     // ── Individual feedback toggles ───────────────────────────────────────────
-
-    // ShopLogger
-    public boolean feedbackShopAdded      = true;
-    public boolean feedbackShopUpdated    = true;
-    public boolean feedbackShopNotSign    = true;
-    public boolean feedbackShopSaveFailed = true;
-    public boolean feedbackWarpSet        = true;
-
-    // EarningsDetector
+    public boolean feedbackShopAdded       = true;
+    public boolean feedbackShopUpdated     = true;
+    public boolean feedbackShopNotSign     = true;
+    public boolean feedbackShopSaveFailed  = true;
+    public boolean feedbackWarpSet         = true;
     public boolean feedbackEarningsPerSale = true;
-
-    // FishingLogger
     public boolean feedbackFishingExported = true;
     public boolean feedbackFishingFailed   = true;
-
-    // Commands
-    public boolean feedbackEarningsReset = true;
-    public boolean feedbackFishingOffset = true;
+    public boolean feedbackEarningsReset   = true;
+    public boolean feedbackFishingOffset   = true;
 
     // ── HUD panel positions ───────────────────────────────────────────────────
     public int fishingX  = 6;
@@ -50,19 +42,17 @@ public class Config {
     public int earningsY = 36;
     public int shopX     = 6;
     public int shopY     = 66;
-
-    // ── Shop Sign HUD ─────────────────────────────────────────────────────────
-    public int shopSignX = 180;
-    public int shopSignY = 6;
-    public boolean shopSignVisible = true;
+    public int signX     = 6;
+    public int signY     = 96;
 
     // ── HUD panel visibility ──────────────────────────────────────────────────
     public boolean fishingVisible  = true;
     public boolean earningsVisible = true;
     public boolean shopVisible     = true;
+    public boolean signVisible     = true;
 
     // ── HUD panel order ───────────────────────────────────────────────────────
-    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop");
+    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
 
     // ── Fishing timer ─────────────────────────────────────────────────────────
     public int timeOffset = 0;
@@ -70,6 +60,7 @@ public class Config {
     // ── Auto-hide delays (minutes) ────────────────────────────────────────────
     public int earningsHideDelayMinutes = 5;
     public int shopHideDelayMinutes     = 5;
+    public int signHideDelayMinutes     = 5;
 
     // ── Fishing session (persisted) ───────────────────────────────────────────
     public String fishingMethod = "";
@@ -91,7 +82,7 @@ public class Config {
                 if (instance == null)
                     instance = new Config();
                 if (instance.panelOrder == null)
-                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop");
+                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
             } catch (IOException e) {
                 System.err.println("[SunnyMod] Failed to load config: " + e.getMessage());
                 instance = new Config();
@@ -114,18 +105,17 @@ public class Config {
         fishingX  = 6;  fishingY  = 6;
         earningsX = 6;  earningsY = 36;
         shopX     = 6;  shopY     = 66;
-        shopSignX = 180; shopSignY = 6;
-
+        signX     = 6;  signY     = 96;
         fishingVisible  = true;
         earningsVisible = true;
         shopVisible     = true;
-        shopSignVisible = true;
-
-        panelOrder = Arrays.asList("fishing", "earnings", "shop");
+        signVisible     = true;
+        panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
     }
 
     public long earningsHideDelayMs() { return (long) earningsHideDelayMinutes * 60 * 1000L; }
     public long shopHideDelayMs()     { return (long) shopHideDelayMinutes     * 60 * 1000L; }
+    public long signHideDelayMs()     { return (long) signHideDelayMinutes     * 60 * 1000L; }
 
     // ── Feedback helpers ──────────────────────────────────────────────────────
     public boolean showShopAdded()       { return feedbackMessages && feedbackShopAdded; }

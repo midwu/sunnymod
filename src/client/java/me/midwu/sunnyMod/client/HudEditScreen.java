@@ -12,7 +12,6 @@ import java.util.List;
 public class HudEditScreen extends Screen {
 
     private static final int SNAP_DIST   = Hud.SNAP_DISTANCE;
-    private static final int PANEL_WIDTH = Hud.PANEL_WIDTH;
     private static final int BAR_HEIGHT  = 24;
     private static final int CHECK_SIZE  = 8;
 
@@ -36,7 +35,8 @@ public class HudEditScreen extends Screen {
 
         Config cfg = Config.get();
         long windowHandle = MinecraftClient.getInstance().getWindow().getHandle();
-        boolean pressed = GLFW.glfwGetMouseButton(windowHandle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
+        boolean pressed = GLFW.glfwGetMouseButton(windowHandle,
+                GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
 
         if (pressed && !wasPressed) {
             handleCheckboxClick(mouseX, mouseY, cfg);
@@ -44,13 +44,13 @@ public class HudEditScreen extends Screen {
 
             if (draggingPanel == null) {
                 List<String> order = new ArrayList<>(cfg.panelOrder);
-                order.add("shopSign"); // make sign draggable
                 for (int i = order.size() - 1; i >= 0; i--) {
                     String panel = order.get(i);
                     int px = getPanelX(cfg, panel);
                     int py = getPanelY(cfg, panel);
+                    int pw = getPanelWidth(panel);
                     int ph = getPanelHeight(panel);
-                    if (mouseX >= px && mouseX <= px + PANEL_WIDTH
+                    if (mouseX >= px && mouseX <= px + pw
                             && mouseY >= py && mouseY <= py + ph) {
                         draggingPanel = panel;
                         dragOffsetX   = mouseX - px;
@@ -65,9 +65,11 @@ public class HudEditScreen extends Screen {
         wasPressed = pressed;
 
         if (draggingPanel != null && pressed) {
-            int newX = (int) Math.clamp(mouseX - dragOffsetX, 0, this.width - PANEL_WIDTH);
+            int pw   = getPanelWidth(draggingPanel);
+            int ph   = getPanelHeight(draggingPanel);
+            int newX = (int) Math.clamp(mouseX - dragOffsetX, 0, this.width  - pw);
             int newY = (int) Math.clamp(mouseY - dragOffsetY, 0,
-                    this.height - BAR_HEIGHT - getPanelHeight(draggingPanel));
+                    this.height - BAR_HEIGHT - ph);
             newX = snapX(cfg, draggingPanel, newX);
             newY = snapY(cfg, draggingPanel, newY);
             setPanelPos(cfg, draggingPanel, newX, newY);
@@ -75,27 +77,26 @@ public class HudEditScreen extends Screen {
 
         // ── Draw panels ───────────────────────────────────────────────────────
         int gold = 0xFFFFD700;
-        String[] allPanels = {"fishing", "earnings", "shop", "shopSign"};
-        for (String panel : allPanels) {
+        for (String panel : cfg.panelOrder) {
             boolean visible = isPanelVisible(cfg, panel);
             int px = getPanelX(cfg, panel);
             int py = getPanelY(cfg, panel);
+            int pw = getPanelWidth(panel);
             int ph = getPanelHeight(panel);
 
-            context.fill(px, py, px + PANEL_WIDTH, py + ph,
+            context.fill(px, py, px + pw, py + ph,
                     visible ? 0xBB000000 : 0x55000000);
 
             int borderColor = panel.equals(draggingPanel) ? 0xFFFFFFFF : gold;
-            context.fill(px, py, px + PANEL_WIDTH, py + 1, borderColor);
-            context.fill(px, py + ph - 1, px + PANEL_WIDTH, py + ph, borderColor);
-            context.fill(px, py, px + 1, py + ph, borderColor);
-            context.fill(px + PANEL_WIDTH - 1, py, px + PANEL_WIDTH, py + ph, borderColor);
+            context.fill(px,          py,          px + pw,     py + 1,      borderColor);
+            context.fill(px,          py + ph - 1, px + pw,     py + ph,     borderColor);
+            context.fill(px,          py,          px + 1,      py + ph,     borderColor);
+            context.fill(px + pw - 1, py,          px + pw,     py + ph,     borderColor);
 
-            String label = panel.equals("shopSign") ? "Shop Sign HUD" :
-                    panel.substring(0, 1).toUpperCase() + panel.substring(1) + " HUD";
+            String label = panel.substring(0, 1).toUpperCase() + panel.substring(1) + " HUD";
             if (!visible) label += " (hidden)";
             context.drawText(this.textRenderer, label,
-                    px + (PANEL_WIDTH - this.textRenderer.getWidth(label)) / 2,
+                    px + (pw - this.textRenderer.getWidth(label)) / 2,
                     py + ph / 2 - 4, gold, true);
         }
 
@@ -103,8 +104,8 @@ public class HudEditScreen extends Screen {
         int barY = this.height - BAR_HEIGHT;
         context.fill(0, barY, this.width, this.height, 0xDD000000);
 
-        String[] panels = {"fishing", "earnings", "shop", "shopSign"};
-        String[] labels = {"Fishing", "Earnings", "Shop", "Shop Sign"};
+        String[] panels = {"fishing", "earnings", "shop", "sign"};
+        String[] labels = {"Fishing", "Earnings", "Shop", "Sign"};
         int startX = 10;
 
         for (int i = 0; i < panels.length; i++) {
@@ -146,13 +147,14 @@ public class HudEditScreen extends Screen {
         super.render(context, mouseX, mouseY, delta);
     }
 
-    // Click handlers
+    // ── Click handlers ────────────────────────────────────────────────────────
+
     private void handleCheckboxClick(int mouseX, int mouseY, Config cfg) {
         int barY = this.height - BAR_HEIGHT;
         if (mouseY < barY) return;
 
-        String[] panels = {"fishing", "earnings", "shop", "shopSign"};
-        String[] labels = {"Fishing", "Earnings", "Shop", "Shop Sign"};
+        String[] panels = {"fishing", "earnings", "shop", "sign"};
+        String[] labels = {"Fishing", "Earnings", "Shop", "Sign"};
         int startX = 10;
 
         for (int i = 0; i < panels.length; i++) {
@@ -184,13 +186,14 @@ public class HudEditScreen extends Screen {
             case "fishing"  -> cfg.fishingVisible  = !cfg.fishingVisible;
             case "earnings" -> cfg.earningsVisible = !cfg.earningsVisible;
             case "shop"     -> cfg.shopVisible     = !cfg.shopVisible;
-            case "shopSign" -> cfg.shopSignVisible = !cfg.shopSignVisible;
+            case "sign"     -> cfg.signVisible     = !cfg.signVisible;
         }
     }
 
-    // Snap logic (unchanged)
+    // ── Snap logic ────────────────────────────────────────────────────────────
+
     private int snapX(Config cfg, String moving, int newX) {
-        for (String other : new String[]{"fishing", "earnings", "shop", "shopSign"}) {
+        for (String other : cfg.panelOrder) {
             if (other.equals(moving)) continue;
             if (Math.abs(newX - getPanelX(cfg, other)) < SNAP_DIST)
                 return getPanelX(cfg, other);
@@ -200,7 +203,7 @@ public class HudEditScreen extends Screen {
 
     private int snapY(Config cfg, String moving, int newY) {
         int mh = getPanelHeight(moving);
-        for (String other : new String[]{"fishing", "earnings", "shop", "shopSign"}) {
+        for (String other : cfg.panelOrder) {
             if (other.equals(moving)) continue;
             int oy = getPanelY(cfg, other);
             int oh = getPanelHeight(other);
@@ -210,13 +213,14 @@ public class HudEditScreen extends Screen {
         return newY;
     }
 
-    // Panel accessors
+    // ── Panel accessors ───────────────────────────────────────────────────────
+
     private int getPanelX(Config cfg, String panel) {
         return switch (panel) {
             case "fishing"  -> cfg.fishingX;
             case "earnings" -> cfg.earningsX;
             case "shop"     -> cfg.shopX;
-            case "shopSign" -> cfg.shopSignX;
+            case "sign"     -> cfg.signX;
             default -> 0;
         };
     }
@@ -226,8 +230,15 @@ public class HudEditScreen extends Screen {
             case "fishing"  -> cfg.fishingY;
             case "earnings" -> cfg.earningsY;
             case "shop"     -> cfg.shopY;
-            case "shopSign" -> cfg.shopSignY;
+            case "sign"     -> cfg.signY;
             default -> 0;
+        };
+    }
+
+    private int getPanelWidth(String panel) {
+        return switch (panel) {
+            case "sign"     -> Hud.getSignPanelWidth();
+            default         -> Hud.PANEL_WIDTH;
         };
     }
 
@@ -236,7 +247,7 @@ public class HudEditScreen extends Screen {
             case "fishing"  -> Hud.getFishingPanelHeight();
             case "earnings" -> Hud.getEarningsPanelHeight();
             case "shop"     -> Hud.getShopPanelHeight();
-            case "shopSign" -> ShopSignHud.SIGN_HEIGHT;
+            case "sign"     -> Hud.getSignPanelHeight();
             default -> 20;
         };
     }
@@ -246,7 +257,7 @@ public class HudEditScreen extends Screen {
             case "fishing"  -> cfg.fishingVisible;
             case "earnings" -> cfg.earningsVisible;
             case "shop"     -> cfg.shopVisible;
-            case "shopSign" -> cfg.shopSignVisible;
+            case "sign"     -> cfg.signVisible;
             default -> true;
         };
     }
@@ -256,9 +267,11 @@ public class HudEditScreen extends Screen {
             case "fishing"  -> { cfg.fishingX  = x; cfg.fishingY  = y; }
             case "earnings" -> { cfg.earningsX = x; cfg.earningsY = y; }
             case "shop"     -> { cfg.shopX     = x; cfg.shopY     = y; }
-            case "shopSign" -> { cfg.shopSignX = x; cfg.shopSignY = y; }
+            case "sign"     -> { cfg.signX     = x; cfg.signY     = y; }
         }
     }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     @Override
     public void close() {

@@ -54,8 +54,12 @@ public class Hud implements ClientModInitializer {
         return PADDING + LINE_HEIGHT + 3 + LINE_HEIGHT + PADDING;
     }
 
-    public static int getShopSignPanelHeight() {
-        return ShopSignHud.SIGN_HEIGHT;
+    public static int getSignPanelHeight() {
+        return ShopSignHud.SIGN_HEIGHT + 10; // +10 for the post
+    }
+
+    public static int getSignPanelWidth() {
+        return ShopSignHud.SIGN_WIDTH;
     }
 
     // ── Auto-hide logic ───────────────────────────────────────────────────────
@@ -70,6 +74,12 @@ public class Hud implements ClientModInitializer {
         long last = ShopLogger.getLastWarpActionTime();
         if (last == 0L) return true;
         return (System.currentTimeMillis() - last) > Config.get().shopHideDelayMs();
+    }
+
+    private boolean signShouldAutoHide() {
+        long last = ShopSignHud.getLastShopTime();
+        if (last == 0L) return true;
+        return (System.currentTimeMillis() - last) > Config.get().signHideDelayMs();
     }
 
     // ── Initialise ────────────────────────────────────────────────────────────
@@ -105,7 +115,8 @@ public class Hud implements ClientModInitializer {
             lastEarningsHeight = currentEarningsHeight;
         });
 
-        HudRenderCallback.EVENT.register((DrawContext drawContext, net.minecraft.client.render.RenderTickCounter tickCounter) -> {
+        HudRenderCallback.EVENT.register((DrawContext drawContext,
+                                          net.minecraft.client.render.RenderTickCounter tickCounter) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (client.player == null || client.currentScreen != null) return;
             renderHud(drawContext, client);
@@ -118,15 +129,23 @@ public class Hud implements ClientModInitializer {
         Config cfg = Config.get();
         for (String panel : cfg.panelOrder) {
             switch (panel) {
-                case "fishing"  -> { if (cfg.fishingVisible) renderFishingPanel(ctx, client, cfg.fishingX, cfg.fishingY); }
-                case "earnings" -> { if (cfg.earningsVisible && !earningsShouldAutoHide()) renderEarningsPanel(ctx, client, cfg.earningsX, cfg.earningsY); }
-                case "shop"     -> { if (cfg.shopVisible && !shopShouldAutoHide())         renderShopPanel(ctx, client, cfg.shopX, cfg.shopY); }
+                case "fishing"  -> {
+                    if (cfg.fishingVisible)
+                        renderFishingPanel(ctx, client, cfg.fishingX, cfg.fishingY);
+                }
+                case "earnings" -> {
+                    if (cfg.earningsVisible && !earningsShouldAutoHide())
+                        renderEarningsPanel(ctx, client, cfg.earningsX, cfg.earningsY);
+                }
+                case "shop"     -> {
+                    if (cfg.shopVisible && !shopShouldAutoHide())
+                        renderShopPanel(ctx, client, cfg.shopX, cfg.shopY);
+                }
+                case "sign"     -> {
+                    if (cfg.signVisible && cfg.shopLoggerEnabled && !signShouldAutoHide())
+                        ShopSignHud.render(ctx, client, cfg.signX, cfg.signY);
+                }
             }
-        }
-
-        // Shop Sign HUD
-        if (cfg.shopSignVisible) {
-            ShopSignHud.render(ctx, client, cfg.shopSignX, cfg.shopSignY);
         }
     }
 
@@ -142,7 +161,8 @@ public class Hud implements ClientModInitializer {
         cursor += LINE_HEIGHT + 2;
         ctx.fill(x + 2, cursor, x + PANEL_WIDTH - 2, cursor + 1, COLOR_DIVIDER);
         cursor += 4;
-        ctx.drawText(client.textRenderer, "Next reset: " + computeFishingTimer(), textX, cursor, COLOR_VALUE, true);
+        ctx.drawText(client.textRenderer,
+                "Next reset: " + computeFishingTimer(), textX, cursor, COLOR_VALUE, true);
     }
 
     private String computeFishingTimer() {
@@ -217,6 +237,7 @@ public class Hud implements ClientModInitializer {
             case "fishing"  -> cfg.fishingY;
             case "earnings" -> cfg.earningsY;
             case "shop"     -> cfg.shopY;
+            case "sign"     -> cfg.signY;
             default -> 0;
         };
     }
@@ -226,6 +247,7 @@ public class Hud implements ClientModInitializer {
             case "fishing"  -> cfg.fishingY  = y;
             case "earnings" -> cfg.earningsY = y;
             case "shop"     -> cfg.shopY     = y;
+            case "sign"     -> cfg.signY     = y;
         }
     }
 
