@@ -68,7 +68,7 @@ public class ModMenuIntegration implements ModMenuApi {
         ConfigCategory feedback = builder.getOrCreateCategory(Text.literal("Feedback"));
 
         feedback.addEntry(eb.startTextDescription(
-                Text.literal("§7Shop Logger messages")).build());
+                Text.literal("§eShop Logger messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(Text.literal("Shop: Added"), cfg.feedbackShopAdded)
                 .setDefaultValue(true)
@@ -100,7 +100,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackWarpSet = v).build());
 
         feedback.addEntry(eb.startTextDescription(
-                Text.literal("§7Earnings Detector messages")).build());
+                Text.literal("§eEarnings Detector messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Earnings: Per Sale"), cfg.feedbackEarningsPerSale)
@@ -109,7 +109,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackEarningsPerSale = v).build());
 
         feedback.addEntry(eb.startTextDescription(
-                Text.literal("§7Fishing Logger messages")).build());
+                Text.literal("§eFishing Logger messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Fishing: Exported to CSV"), cfg.feedbackFishingExported)
@@ -124,7 +124,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.feedbackFishingFailed = v).build());
 
         feedback.addEntry(eb.startTextDescription(
-                Text.literal("§7Command messages")).build());
+                Text.literal("§eCommand messages")).build());
 
         feedback.addEntry(eb.startBooleanToggle(
                         Text.literal("Command: Earnings Reset"), cfg.feedbackEarningsReset)
@@ -183,7 +183,7 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setSaveConsumer(v -> cfg.signVisible = v).build());
 
         hud.addEntry(eb.startTextDescription(
-                        Text.literal("§7Use the button below to reset all panel positions to defaults."))
+                        Text.literal("§eUse the button below to reset all panel positions to defaults."))
                 .build());
 
         hud.addEntry(eb.startBooleanToggle(
@@ -207,17 +207,17 @@ public class ModMenuIntegration implements ModMenuApi {
                 .setTooltip(Text.literal("Adjust the fishing reset timer offset (0-2 hours)"))
                 .setSaveConsumer(v -> cfg.timeOffset = v).build());
 
-        fishing.addEntry(eb.startStrField(
-                        Text.literal("Fishing Method"), cfg.fishingMethod)
-                .setDefaultValue("")
-                .setTooltip(Text.literal("Your fishing method (e.g. AFK, manual). Saved to CSV."))
-                .setSaveConsumer(v -> cfg.fishingMethod = v).build());
-
-        fishing.addEntry(eb.startStrField(
-                        Text.literal("Fishing Rod"), cfg.fishingRod)
-                .setDefaultValue("")
-                .setTooltip(Text.literal("Your fishing rod name. Saved to CSV."))
-                .setSaveConsumer(v -> cfg.fishingRod = v).build());
+//        fishing.addEntry(eb.startStrField(
+//                        Text.literal("Fishing Method"), cfg.fishingMethod)
+//                .setDefaultValue("")
+//                .setTooltip(Text.literal("Your fishing method (e.g. AFK, manual). Saved to CSV."))
+//                .setSaveConsumer(v -> cfg.fishingMethod = v).build());
+//
+//        fishing.addEntry(eb.startStrField(
+//                        Text.literal("Fishing Rod"), cfg.fishingRod)
+//                .setDefaultValue("")
+//                .setTooltip(Text.literal("Your fishing rod name. Saved to CSV."))
+//                .setSaveConsumer(v -> cfg.fishingRod = v).build());
 
         // ── Resets ────────────────────────────────────────────────────────────
         ConfigCategory resets = builder.getOrCreateCategory(Text.literal("Resets"));
