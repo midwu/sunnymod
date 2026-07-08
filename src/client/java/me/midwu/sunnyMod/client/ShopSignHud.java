@@ -3,30 +3,24 @@ package me.midwu.sunnyMod.client;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.font.TextRenderer;
 import net.minecraft.client.gui.DrawContext;
-import net.minecraft.util.Identifier;
 
 public class ShopSignHud {
-
-    // Sign texture from Minecraft's own assets
-    private static final Identifier SIGN_TEXTURE =
-            Identifier.of("minecraft", "textures/entity/signs/oak.png");
 
     // Medium size: ~1.5x a real sign
     public static final int SIGN_WIDTH  = 140;
     public static final int SIGN_HEIGHT = 56;
-
-    // Panel name used in HUD system
-    public static final String PANEL_NAME = "sign";
 
     private static volatile LastShopInfo lastShop = null;
     private static volatile long         lastShopTime = 0L;
 
     public static void updateLastShop(LastShopInfo info) {
         lastShop     = info;
-        lastShopTime = info.timestamp;
+        lastShopTime = System.currentTimeMillis();  // Use real time for auto-hide
     }
 
-    public static long getLastShopTime() { return lastShopTime; }
+    public static long getLastShopTime() {
+        return lastShopTime;
+    }
 
     public static void render(DrawContext ctx, MinecraftClient client, int x, int y) {
         if (lastShop == null) return;

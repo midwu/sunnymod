@@ -6,9 +6,10 @@ public class LastShopInfo {
     public final int stockSpace;
     public final double price;
     public final String action;
-    public final long timestamp;
+    public final String timestamp;   // Changed to String to match ShopLogger
 
-    public LastShopInfo(String owner, String item, int stockSpace, double price, String action, long timestamp) {
+    public LastShopInfo(String owner, String item, int stockSpace, double price,
+                        String action, String timestamp) {
         this.owner = owner;
         this.item = item;
         this.stockSpace = stockSpace;
