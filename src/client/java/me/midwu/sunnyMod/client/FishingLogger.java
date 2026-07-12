@@ -192,7 +192,7 @@ public class FishingLogger implements ClientModInitializer {
                 return;
             }
 
-            // Prize detection (FIXED)
+            // Prize detection
             Matcher prizeMatcher;
             if ((prizeMatcher = PRIZE_1ST.matcher(text)).find()) {
                 applyPrize(1, prizeMatcher.group(1));
@@ -308,12 +308,17 @@ public class FishingLogger implements ClientModInitializer {
             row.append(formatNumber(grandTotalCash)).append(",");
             row.append(formatNumber(rainPercent)).append("\n");
 
-            StringBuilder fullFile = new StringBuilder();
-            fullFile.append(String.join(",", getStaticHeaders())).append("\n");
-            fullFile.append(row);
+            // === FIXED: Proper header + append logic ===
+            boolean fileExists = Files.exists(CSV_FILE);
+            if (!fileExists || Files.size(CSV_FILE) == 0) {
+                String headerLine = String.join(",", getStaticHeaders()) + "\n";
+                Files.write(CSV_FILE, headerLine.getBytes(StandardCharsets.UTF_8),
+                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            }
 
-            Files.write(CSV_FILE, fullFile.toString().getBytes(StandardCharsets.UTF_8),
-                    StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
+            // Append the data row
+            Files.write(CSV_FILE, row.toString().getBytes(StandardCharsets.UTF_8),
+                    StandardOpenOption.APPEND);
 
             debugLog("Exported to CSV: " + CSV_FILE);
             sendExportedFeedback("§a[Fishing] Contest data saved to CSV.");
