@@ -16,6 +16,7 @@
       "me.midwu.sunnyMod.client.ShopLogger",
       "me.midwu.sunnyMod.client.Hud",
       "me.midwu.sunnyMod.client.Commands",
+      "me.midwu.sunnyMod.client.Container_reader",
       "me.midwu.sunnyMod.client.FishingLogger",
       "me.midwu.sunnyMod.client.EarningsDetector"
     ],
