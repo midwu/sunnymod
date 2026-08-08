@@ -16,9 +16,11 @@
       "me.midwu.sunnyMod.client.ShopLogger",
       "me.midwu.sunnyMod.client.Hud",
       "me.midwu.sunnyMod.client.Commands",
-      "me.midwu.sunnyMod.client.Container_reader",
       "me.midwu.sunnyMod.client.FishingLogger",
-      "me.midwu.sunnyMod.client.EarningsDetector"
+      "me.midwu.sunnyMod.client.EarningsDetector",
+      "me.midwu.sunnyMod.client.Container_reader",
+      "me.midwu.sunnyMod.client.Servershoplogger",
+      "me.midwu.sunnyMod.client.Premiumshoplogger"
     ],
     "modmenu": [
       "me.midwu.sunnyMod.client.ModMenuIntegration"
