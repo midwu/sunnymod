@@ -15,6 +15,7 @@ import org.lwjgl.glfw.GLFW;
 
 import java.time.LocalTime;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 import java.util.Map;
 
 public class Hud implements ClientModInitializer {
@@ -60,6 +61,10 @@ public class Hud implements ClientModInitializer {
 
     public static int getSignPanelWidth() {
         return ShopSignHud.SIGN_WIDTH;
+    }
+
+    public static int getWorthPanelHeight() {
+        return ContainerWorthHud.getPanelHeight();
     }
 
     // ── Auto-hide logic ───────────────────────────────────────────────────────

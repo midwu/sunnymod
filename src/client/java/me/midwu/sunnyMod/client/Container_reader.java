@@ -22,6 +22,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -206,7 +207,7 @@ public class Container_reader implements ClientModInitializer {
             return;
         }
 
-        String msg = "§a[ContainerReader] Estimated worth: §f$" + String.format("%,.2f", total) +
+        String msg = "§a[ContainerReader] Estimated worth: §f$" + String.format(Locale.US, "%,.2f", total) +
                 " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s))";
         client.player.sendMessage(Text.literal(msg), false);
 

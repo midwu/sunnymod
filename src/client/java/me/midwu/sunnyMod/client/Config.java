@@ -44,15 +44,18 @@ public class Config {
     public int shopY     = 66;
     public int signX     = 6;
     public int signY     = 96;
+    public int worthX    = 6;
+    public int worthY    = 126;
 
     // ── HUD panel visibility ──────────────────────────────────────────────────
     public boolean fishingVisible  = true;
     public boolean earningsVisible = true;
     public boolean shopVisible     = true;
     public boolean signVisible     = true;
+    public boolean worthVisible    = true;
 
     // ── HUD panel order ───────────────────────────────────────────────────────
-    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
+    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
 
     // ── Fishing timer ─────────────────────────────────────────────────────────
     public int timeOffset = 0;
@@ -61,6 +64,7 @@ public class Config {
     public int earningsHideDelayMinutes = 5;
     public int shopHideDelayMinutes     = 5;
     public int signHideDelayMinutes     = 5;
+    public int worthHideDelayMinutes    = 5;
 
     // ── Fishing session (persisted) ───────────────────────────────────────────
     public String fishingMethod = "";
@@ -82,7 +86,7 @@ public class Config {
                 if (instance == null)
                     instance = new Config();
                 if (instance.panelOrder == null)
-                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
+                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
             } catch (IOException e) {
                 System.err.println("[SunnyMod] Failed to load config: " + e.getMessage());
                 instance = new Config();
@@ -106,16 +110,19 @@ public class Config {
         earningsX = 6;  earningsY = 36;
         shopX     = 6;  shopY     = 66;
         signX     = 6;  signY     = 96;
+        worthX    = 6;  worthY    = 126;
         fishingVisible  = true;
         earningsVisible = true;
         shopVisible     = true;
         signVisible     = true;
-        panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign");
+        worthVisible    = true;
+        panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
     }
 
     public long earningsHideDelayMs() { return (long) earningsHideDelayMinutes * 60 * 1000L; }
     public long shopHideDelayMs()     { return (long) shopHideDelayMinutes     * 60 * 1000L; }
     public long signHideDelayMs()     { return (long) signHideDelayMinutes     * 60 * 1000L; }
+    public long worthHideDelayMs()    { return (long) worthHideDelayMinutes    * 60 * 1000L; }
 
     // ── Feedback helpers ──────────────────────────────────────────────────────
     public boolean showShopAdded()       { return feedbackMessages && feedbackShopAdded; }
