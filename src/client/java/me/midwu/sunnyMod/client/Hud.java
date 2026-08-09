@@ -87,6 +87,12 @@ public class Hud implements ClientModInitializer {
         return (System.currentTimeMillis() - last) > Config.get().signHideDelayMs();
     }
 
+    private boolean worthShouldAutoHide() {
+        long last = ContainerWorthHud.getLastUpdateTime();
+        if (last == 0L) return true;
+        return (System.currentTimeMillis() - last) > Config.get().worthHideDelayMs();
+    }
+
     // ── Initialise ────────────────────────────────────────────────────────────
 
     @Override
@@ -150,6 +156,10 @@ public class Hud implements ClientModInitializer {
                     if (cfg.signVisible && cfg.shopLoggerEnabled && !signShouldAutoHide())
                         ShopSignHud.render(ctx, client, cfg.signX, cfg.signY);
                 }
+                case "worth"    -> {
+                    if (cfg.worthVisible && !worthShouldAutoHide())
+                        ContainerWorthHud.render(ctx, client, cfg.worthX, cfg.worthY);
+                }
             }
         }
     }
@@ -198,7 +208,7 @@ public class Hud implements ClientModInitializer {
         ctx.fill(x + 2, cursor, x + PANEL_WIDTH - 2, cursor + 1, COLOR_DIVIDER);
         cursor += 4;
         ctx.drawText(client.textRenderer,
-                "Total: " + String.format("$%,.2f", total), textX, cursor, COLOR_VALUE, true);
+                "Total: " + String.format(Locale.US, "$%,.2f", total), textX, cursor, COLOR_VALUE, true);
         cursor += LINE_HEIGHT + 4;
         ctx.drawText(client.textRenderer, "Items Sold", textX, cursor, COLOR_LABEL, true);
         cursor += LINE_HEIGHT + 2;
@@ -243,6 +253,7 @@ public class Hud implements ClientModInitializer {
             case "earnings" -> cfg.earningsY;
             case "shop"     -> cfg.shopY;
             case "sign"     -> cfg.signY;
+            case "worth"    -> cfg.worthY;
             default -> 0;
         };
     }
@@ -253,6 +264,7 @@ public class Hud implements ClientModInitializer {
             case "earnings" -> cfg.earningsY = y;
             case "shop"     -> cfg.shopY     = y;
             case "sign"     -> cfg.signY     = y;
+            case "worth"    -> cfg.worthY    = y;
         }
     }
 

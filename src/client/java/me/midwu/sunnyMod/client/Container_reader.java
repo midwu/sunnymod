@@ -182,6 +182,7 @@ public class Container_reader implements ClientModInitializer {
         int pricedStacks = 0;
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
+        List<ContainerWorthHud.Entry> entries = new ArrayList<>();
 
         for (Slot slot : screen.getScreenHandler().slots) {
             ItemStack stack = slot.getStack();
@@ -189,6 +190,8 @@ public class Container_reader implements ClientModInitializer {
 
             String name = stack.getItem().getName().getString();
             Double price = bestPrices.get(name);
+
+            entries.add(new ContainerWorthHud.Entry(name, stack.getCount(), price));
 
             if (price != null) {
                 total += price * stack.getCount();
@@ -207,8 +210,14 @@ public class Container_reader implements ClientModInitializer {
             return;
         }
 
+        // Highest-value entries first, so if the panel's row cap kicks in
+        // (see ContainerWorthHud.MAX_VISIBLE_ROWS) the most useful rows are
+        // the ones guaranteed to be visible.
+        entries.sort((a, b) -> Double.compare(b.subtotal, a.subtotal));
+        ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries);
+
         String msg = "§a[ContainerReader] Estimated worth: §f$" + String.format(Locale.US, "%,.2f", total) +
-                " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s))";
+                " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s)) — see HUD for breakdown";
         client.player.sendMessage(Text.literal(msg), false);
 
         if (!missingItems.isEmpty()) {
