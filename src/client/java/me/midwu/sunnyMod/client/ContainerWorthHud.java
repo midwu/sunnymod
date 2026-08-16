@@ -22,6 +22,8 @@ public class ContainerWorthHud {
         public final double subtotal;  // 0 if unitPrice is null
         public final String owner;
         public final String warp;
+        public final String location;    // raw "x, y, z" from shop_data, may be empty
+        public final String stockSpace;
 
         public Entry(String name, int count, Container_reader.BestBuyOffer offer) {
             this.name = name;
@@ -31,11 +33,15 @@ public class ContainerWorthHud {
                 this.subtotal = offer.price * count;
                 this.owner = offer.owner != null ? offer.owner : "";
                 this.warp = offer.warp != null ? offer.warp : "";
+                this.location = offer.location != null ? offer.location : "";
+                this.stockSpace = offer.stockSpace != null ? offer.stockSpace : "";
             } else {
                 this.unitPrice = null;
                 this.subtotal = 0.0;
                 this.owner = "";
                 this.warp = "";
+                this.location = "";
+                this.stockSpace = "";
             }
         }
 
@@ -46,8 +52,17 @@ public class ContainerWorthHud {
             this.subtotal = (unitPrice != null) ? unitPrice * count : 0.0;
             this.owner = "";
             this.warp = "";
+            this.location = "";
+            this.stockSpace = "";
         }
     }
+
+    /** Last results — used when F7 is pressed outside a container. */
+    public static List<Entry> getEntries() { return entries; }
+    public static double getTotal() { return total; }
+    public static int getPricedStacks() { return pricedStacks; }
+    public static int getUnpricedStacks() { return unpricedStacks; }
+    public static boolean hasResults() { return lastUpdateTime > 0L; }
 
     private static final int MAX_VISIBLE_ROWS = 14;
 

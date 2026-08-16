@@ -1,13 +1,16 @@
 package me.midwu.sunnyMod.client;
 
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.text.Text;
+import net.minecraft.util.math.BlockPos;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -15,10 +18,11 @@ import java.util.Locale;
  * Full-screen (scrollable) breakdown of F7 chest-worth results.
  *
  * Layout per row:
- *   Item name xCount          $unit  $subtotal   [ /warp name ]
+ *   Item name xCount   $unit  $subtotal   [Warp] [Find]
  *
- * Clicking a warp button runs the teleport command on the server and
- * closes this screen. ESC / the Close button returns without warping.
+ * Warp runs /warp … on the server.
+ * Find pre-fills a SignFinder search (/findsign …) when that mod is loaded,
+ * otherwise shows the stored shop coordinates (and distance if parseable).
  */
 public class ContainerWorthScreen extends Screen {
 
@@ -26,12 +30,14 @@ public class ContainerWorthScreen extends Screen {
     private static final int HEADER_H   = 48;
     private static final int FOOTER_H   = 28;
     private static final int PAD        = 12;
-    private static final int WARP_BTN_W = 120;
+    private static final int WARP_BTN_W = 100;
+    private static final int FIND_BTN_W = 50;
 
     private final List<ContainerWorthHud.Entry> entries;
     private final double total;
     private final int pricedStacks;
     private final int unpricedStacks;
+    private final boolean signFinderLoaded;
 
     private int scrollOffset = 0; // in rows
     private int maxScroll    = 0;
@@ -43,6 +49,7 @@ public class ContainerWorthScreen extends Screen {
         this.total = total;
         this.pricedStacks = pricedStacks;
         this.unpricedStacks = unpricedStacks;
+        this.signFinderLoaded = FabricLoader.getInstance().isModLoaded("signfinder");
     }
 
     @Override
@@ -55,7 +62,6 @@ public class ContainerWorthScreen extends Screen {
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         maxScroll = Math.max(0, entries.size() - visibleRows);
 
-        // Close button
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(this.width - PAD - 80, this.height - FOOTER_H + 4, 80, 20)
                 .build());
@@ -64,8 +70,6 @@ public class ContainerWorthScreen extends Screen {
     }
 
     private void rebuildRowButtons(int visibleRows) {
-        // Remove previous row buttons (keep the Close button — last added in init,
-        // but safer to clear all and re-add close).
         clearChildren();
         addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
                 .dimensions(this.width - PAD - 80, this.height - FOOTER_H + 4, 80, 20)
@@ -73,20 +77,26 @@ public class ContainerWorthScreen extends Screen {
 
         int listTop = HEADER_H;
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
+        int findX = this.width - PAD - FIND_BTN_W;
+        int warpX = findX - 4 - WARP_BTN_W;
 
         for (int i = scrollOffset; i < end; i++) {
             ContainerWorthHud.Entry e = entries.get(i);
             int rowY = listTop + (i - scrollOffset) * ROW_HEIGHT;
 
             String warpCmd = normalizeWarp(e.warp);
-            if (warpCmd.isEmpty()) continue;
+            if (!warpCmd.isEmpty()) {
+                String label = warpCmd.length() > 14 ? warpCmd.substring(0, 13) + "…" : warpCmd;
+                final String cmd = warpCmd;
+                addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> runWarp(cmd))
+                        .dimensions(warpX, rowY, WARP_BTN_W, 20)
+                        .build());
+            }
 
-            String label = warpCmd.length() > 16 ? warpCmd.substring(0, 15) + "…" : warpCmd;
-            final String cmd = warpCmd;
-            int btnX = this.width - PAD - WARP_BTN_W;
-
-            addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> runWarp(cmd))
-                    .dimensions(btnX, rowY, WARP_BTN_W, 20)
+            final ContainerWorthHud.Entry entry = e;
+            String findLabel = signFinderLoaded ? "Find" : "Pos";
+            addDrawableChild(ButtonWidget.builder(Text.literal(findLabel), b -> onFind(entry))
+                    .dimensions(findX, rowY, FIND_BTN_W, 20)
                     .build());
         }
     }
@@ -95,11 +105,60 @@ public class ContainerWorthScreen extends Screen {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayNetworkHandler net = mc.getNetworkHandler();
         if (net == null) return;
-
-        // sendChatCommand expects no leading slash
         String cmd = warpCmd.startsWith("/") ? warpCmd.substring(1) : warpCmd;
         net.sendChatCommand(cmd);
         close();
+    }
+
+    private void onFind(ContainerWorthHud.Entry e) {
+        MinecraftClient mc = MinecraftClient.getInstance();
+        if (mc.player == null) return;
+
+        if (signFinderLoaded) {
+            // Prefill chat with a SignFinder search for this item name.
+            String query = e.name.contains(" ") ? "\"" + e.name + "\"" : e.name;
+            close();
+            mc.setScreen(new ChatScreen("/findsign " + query, false));
+            return;
+        }
+
+        String loc = e.location;
+        if (loc == null || loc.isBlank()) {
+            mc.player.sendMessage(Text.literal(
+                    "§e[ContainerReader] No coordinates stored for §f" + e.name +
+                            "§e. Scan the shop sign to record them."), false);
+            return;
+        }
+
+        BlockPos shopPos = parseLocation(loc);
+        String msg;
+        if (shopPos != null) {
+            PlayerEntity p = mc.player;
+            double dist = Math.sqrt(p.squaredDistanceTo(
+                    shopPos.getX() + 0.5, shopPos.getY() + 0.5, shopPos.getZ() + 0.5));
+            msg = String.format(Locale.US,
+                    "§a[ContainerReader] §f%s §7shop at §f%d %d %d §7(§f%.0fm §7away) owner §f%s",
+                    e.name, shopPos.getX(), shopPos.getY(), shopPos.getZ(), dist,
+                    e.owner.isEmpty() ? "?" : e.owner);
+        } else {
+            msg = "§a[ContainerReader] §f" + e.name + " §7location: §f" + loc +
+                    (e.owner.isEmpty() ? "" : " §7owner §f" + e.owner);
+        }
+        mc.player.sendMessage(Text.literal(msg), false);
+    }
+
+    private static BlockPos parseLocation(String loc) {
+        try {
+            String cleaned = loc.replace(',', ' ').trim();
+            String[] parts = cleaned.split("\\s+");
+            if (parts.length < 3) return null;
+            int x = (int) Double.parseDouble(parts[0]);
+            int y = (int) Double.parseDouble(parts[1]);
+            int z = (int) Double.parseDouble(parts[2]);
+            return new BlockPos(x, y, z);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private static String normalizeWarp(String warp) {
@@ -115,7 +174,6 @@ public class ContainerWorthScreen extends Screen {
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
         super.render(ctx, mouseX, mouseY, delta);
 
-        // Title + total
         ctx.drawCenteredTextWithShadow(textRenderer, "Chest Worth", this.width / 2, 10, 0xFFFFD700);
         String totalLine = "Total: $" + String.format(Locale.US, "%,.2f", total) +
                 "   (" + pricedStacks + " priced / " + unpricedStacks + " unpriced stacks, " +
@@ -123,7 +181,8 @@ public class ContainerWorthScreen extends Screen {
         ctx.drawCenteredTextWithShadow(textRenderer, totalLine, this.width / 2, 24, 0xFFFFFFFF);
 
         if (entries.isEmpty()) {
-            ctx.drawCenteredTextWithShadow(textRenderer, "No items to show", this.width / 2, HEADER_H + 20, 0xFFAAAAAA);
+            ctx.drawCenteredTextWithShadow(textRenderer, "No items to show",
+                    this.width / 2, HEADER_H + 20, 0xFFAAAAAA);
             return;
         }
 
@@ -132,16 +191,20 @@ public class ContainerWorthScreen extends Screen {
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
 
-        // Column headers
         int nameX = PAD;
-        int qtyX  = Math.min(220, this.width / 3);
-        int unitX = Math.min(300, this.width / 2 - 40);
-        int subX  = Math.min(400, this.width / 2 + 40);
+        int qtyX  = Math.min(200, this.width / 4);
+        int unitX = Math.min(270, this.width / 3);
+        int subX  = Math.min(360, this.width / 2);
+        int findX = this.width - PAD - FIND_BTN_W;
+        int warpX = findX - 4 - WARP_BTN_W;
+
         ctx.drawText(textRenderer, "Item", nameX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Qty", qtyX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Unit $", unitX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Total $", subX, listTop - 12, 0xFFAAAAAA, false);
-        ctx.drawText(textRenderer, "Warp", this.width - PAD - WARP_BTN_W, listTop - 12, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Warp", warpX, listTop - 12, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, signFinderLoaded ? "Find" : "Pos",
+                findX, listTop - 12, 0xFFAAAAAA, false);
 
         for (int i = scrollOffset; i < end; i++) {
             ContainerWorthHud.Entry e = entries.get(i);
@@ -168,24 +231,22 @@ public class ContainerWorthScreen extends Screen {
                 ctx.drawText(textRenderer, "—", unitX, rowY, 0xFF666666, false);
                 ctx.drawText(textRenderer, "—", subX, rowY, 0xFF666666, false);
             }
-
-            // Owner hint left of warp button when no warp
-            if ((e.warp == null || e.warp.isBlank()) && e.owner != null && !e.owner.isEmpty()) {
-                String who = "__server__".equals(e.owner) ? "@server" : "@" + e.owner;
-                ctx.drawText(textRenderer, who,
-                        this.width - PAD - WARP_BTN_W, rowY, 0xFFAAAAAA, false);
-            }
         }
 
-        // Scroll hint
         if (maxScroll > 0) {
             String scrollHint = "Scroll " + (scrollOffset + 1) + "–" + end + " / " + entries.size();
             ctx.drawText(textRenderer, scrollHint, PAD, this.height - FOOTER_H + 8, 0xFF888888, false);
         }
+
+        if (signFinderLoaded) {
+            ctx.drawText(textRenderer, "Find = SignFinder search",
+                    PAD + 120, this.height - FOOTER_H + 8, 0xFF666666, false);
+        }
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double horizontalAmount, double verticalAmount) {
+    public boolean mouseScrolled(double mouseX, double mouseY,
+                                 double horizontalAmount, double verticalAmount) {
         int listTop = HEADER_H;
         int listBottom = this.height - FOOTER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);

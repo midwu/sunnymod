@@ -129,9 +129,20 @@ public class Container_reader implements ClientModInitializer {
             if (isF7Down && !wasF7Down) {
                 if (client.currentScreen instanceof HandledScreen<?> handledScreen) {
                     evaluateContainerWorth(handledScreen);
+                } else if (client.currentScreen instanceof ContainerWorthScreen) {
+                    // Already open — ignore
                 } else if (client.player != null) {
-                    client.player.sendMessage(Text.literal(
-                            "§e[ContainerReader] No container-style menu open — nothing to value."), false);
+                    // Outside a container: reopen last results if any
+                    if (ContainerWorthHud.hasResults()) {
+                        client.setScreen(new ContainerWorthScreen(
+                                ContainerWorthHud.getEntries(),
+                                ContainerWorthHud.getTotal(),
+                                ContainerWorthHud.getPricedStacks(),
+                                ContainerWorthHud.getUnpricedStacks()));
+                    } else {
+                        client.player.sendMessage(Text.literal(
+                                "§e[ContainerReader] No previous scan. Open a chest and press F7 first."), false);
+                    }
                 }
             }
             wasF7Down = isF7Down;
@@ -280,7 +291,11 @@ public class Container_reader implements ClientModInitializer {
                     "§cNo BUYING offers loaded. Open a server sell menu or scan player shops first."), false);
         }
 
-        // Open the interactive screen (real warp buttons). Closes the chest GUI.
+        // Close the container on the server first, otherwise the server keeps the
+        // chest/shulker "open" (and locked for others) after we swap screens.
+        if (client.player != null) {
+            client.player.closeHandledScreen();
+        }
         client.setScreen(new ContainerWorthScreen(entries, total, pricedStacks, unpricedStacks));
     }
 
