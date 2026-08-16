@@ -92,33 +92,54 @@ publishing {
     }
 }
 
-// ── Release task ──────────────────────────────────────────────────────────────
-// Run with: ./gradlew release
-// Increments mod_version_build in gradle.properties, then builds the jar.
+// Version bump helpers.
+//   ./gradlew release        → 0.13.N → 0.13.N+1
+//   ./gradlew releaseMinor   → 0.13.N → 0.14.0
+//   ./gradlew releaseMajor   → 0.N.x  → 1.0.0
+
+def bumpVersion = { String which ->
+    def propsFile = file('gradle.properties')
+    def props = new Properties()
+    propsFile.withInputStream { props.load(it) }
+
+    int major = props.getProperty('mod_version_major').toInteger()
+    int minor = props.getProperty('mod_version_minor').toInteger()
+    int build = props.getProperty('mod_version_build').toInteger()
+
+    if (which == 'major') {
+        major += 1; minor = 0; build = 0
+    } else if (which == 'minor') {
+        minor += 1; build = 0
+    } else {
+        build += 1
+    }
+
+    props.setProperty('mod_version_major', major.toString())
+    props.setProperty('mod_version_minor', minor.toString())
+    props.setProperty('mod_version_build', build.toString())
+    propsFile.withOutputStream { props.store(it, null) }
+
+    project.version = "${major}.${minor}.${build}"
+    println "Building version ${project.version}"
+}
 
 tasks.register('release') {
     group = 'sunny-mod'
-    description = 'Increments the build version and builds the release jar'
+    description = 'Bump patch/build and build the jar'
+    doFirst { bumpVersion('build') }
+    finalizedBy('build')
+}
 
-    doFirst {
-        // Read current properties file
-        def propsFile = file('gradle.properties')
-        def props = new Properties()
-        propsFile.withInputStream { props.load(it) }
+tasks.register('releaseMinor') {
+    group = 'sunny-mod'
+    description = 'Bump minor (0.13.N → 0.14.0) and build the jar'
+    doFirst { bumpVersion('minor') }
+    finalizedBy('build')
+}
 
-        // Increment build number
-        int currentBuild = props.getProperty('mod_version_build').toInteger()
-        int nextBuild    = currentBuild + 1
-        props.setProperty('mod_version_build', nextBuild.toString())
-
-        // Write back
-        propsFile.withOutputStream { props.store(it, null) }
-
-        // Update the project version for this build
-        project.version = "${versionMajor}.${versionMinor}.${nextBuild}"
-        println "Building version ${project.version}"
-    }
-
-    // Run the actual build after incrementing
+tasks.register('releaseMajor') {
+    group = 'sunny-mod'
+    description = 'Bump major (0.N.x → 1.0.0) and build the jar'
+    doFirst { bumpVersion('major') }
     finalizedBy('build')
 }
