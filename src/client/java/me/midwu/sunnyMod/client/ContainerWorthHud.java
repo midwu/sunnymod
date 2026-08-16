@@ -11,13 +11,11 @@ import java.util.Locale;
  * ShopSignHud — a plain static utility, driven by Container_reader.update()
  * and drawn by Hud.renderHud() alongside the other panels.
  *
- * Shows every non-empty slot from the last F7 press, sorted by value
- * descending (unpriced items sink toward the bottom, since their subtotal
- * is 0). Capped at MAX_VISIBLE_ROWS — a double chest can have up to 54
- * distinct stacks, which would run off the bottom of the screen with no
- * scrolling support in this HUD system, so anything beyond the cap is
- * collapsed into a single "+N more" summary line instead of being dropped
- * silently.
+ * Shows one row per distinct item name (identical stacks are merged), sorted
+ * by value descending. Each priced row includes the best buyer (owner) and
+ * warp when known, so you can see where to sell without leaving the chest.
+ * Capped at MAX_VISIBLE_ROWS; anything beyond is collapsed into a "+N more"
+ * summary line.
  */
 public class ContainerWorthHud {
 
@@ -26,12 +24,34 @@ public class ContainerWorthHud {
         public final int count;
         public final Double unitPrice; // null = no known price
         public final double subtotal;  // 0 if unitPrice is null
+        public final String owner;     // best buyer, may be empty
+        public final String warp;      // e.g. "/warp foo", may be empty
 
+        /** Preferred constructor — takes the full BestBuyOffer (or null). */
+        public Entry(String name, int count, Container_reader.BestBuyOffer offer) {
+            this.name = name;
+            this.count = count;
+            if (offer != null) {
+                this.unitPrice = offer.price;
+                this.subtotal = offer.price * count;
+                this.owner = offer.owner != null ? offer.owner : "";
+                this.warp = offer.warp != null ? offer.warp : "";
+            } else {
+                this.unitPrice = null;
+                this.subtotal = 0.0;
+                this.owner = "";
+                this.warp = "";
+            }
+        }
+
+        /** Back-compat constructor used only if something still passes a bare price. */
         public Entry(String name, int count, Double unitPrice) {
             this.name = name;
             this.count = count;
             this.unitPrice = unitPrice;
             this.subtotal = (unitPrice != null) ? unitPrice * count : 0.0;
+            this.owner = "";
+            this.warp = "";
         }
     }
 
@@ -88,12 +108,23 @@ public class ContainerWorthHud {
         int shown = Math.min(snapshot.size(), MAX_VISIBLE_ROWS);
         for (int i = 0; i < shown; i++) {
             Entry e = snapshot.get(i);
-            String priceText = (e.unitPrice != null)
-                    ? "$" + String.format(Locale.US, "%,.2f", e.subtotal)
-                    : "no price";
-            String line = truncate(client, e.name + " x" + e.count, priceText);
+            String right;
+            if (e.unitPrice != null) {
+                right = "$" + String.format(Locale.US, "%,.2f", e.subtotal);
+                // Prefer a short owner tag; fall back to warp if owner is empty
+                // (e.g. some edge cases) or is the synthetic server marker.
+                String where = formatWhere(e.owner, e.warp);
+                if (!where.isEmpty()) {
+                    right = right + " " + where;
+                }
+            } else {
+                right = "no price";
+            }
+
+            String left = e.name + " x" + e.count;
+            String line = truncate(client, left, right);
             int color = (e.unitPrice != null) ? 0xFFFFFFFF : 0xFF888888;
-            ctx.drawText(client.textRenderer, line + " - " + priceText, textX, cursor, color, true);
+            ctx.drawText(client.textRenderer, line + " - " + right, textX, cursor, color, true);
             cursor += Hud.LINE_HEIGHT;
         }
 
@@ -104,6 +135,29 @@ public class ContainerWorthHud {
             String moreLine = "+" + hiddenCount + " more ($" + String.format(Locale.US, "%,.2f", hiddenValue) + ")";
             ctx.drawText(client.textRenderer, moreLine, textX, cursor, 0xFFAAAAAA, true);
         }
+    }
+
+    /**
+     * Compact "where to sell" tag.
+     * - "__server__" → "@server"
+     * - normal player → "@Name"
+     * - if warp present and owner is blank → the warp itself
+     * - otherwise empty
+     */
+    private static String formatWhere(String owner, String warp) {
+        if (owner != null && !owner.isEmpty()) {
+            if ("__server__".equals(owner)) return "@server";
+            // Keep it short for the 160px panel
+            String shortOwner = owner.length() > 12 ? owner.substring(0, 11) + "…" : owner;
+            return "@" + shortOwner;
+        }
+        if (warp != null && !warp.isEmpty()) {
+            // warp is often stored as "/warp name"
+            String w = warp.startsWith("/warp ") ? warp.substring(6) : warp;
+            if (w.length() > 12) w = w.substring(0, 11) + "…";
+            return "/" + w;
+        }
+        return "";
     }
 
     private static String truncate(MinecraftClient client, String text, String priceText) {

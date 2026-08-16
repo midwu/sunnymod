@@ -21,6 +21,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -38,8 +39,9 @@ import java.util.Map;
  *   F7 — estimates the total sell value of the open container's contents,
  *        using the best known "BUYING" price per item from shop_data.csv
  *        (this includes both real player shops and the server's own
- *        grindable-item shop via ServerShopLogger). Read-only, no file
- *        writes — just a chat estimate.
+ *        grindable-item shop via ServerShopLogger). For each distinct
+ *        item it also surfaces the full best-offer row (owner + warp)
+ *        so you can see where to sell. Read-only, no file writes.
  *
  * Both are read via raw GLFW state polling (glfwGetKey), not a Minecraft
  * KeyBinding — custom KeyBindings don't reliably update while a screen owns
@@ -66,13 +68,35 @@ public class Container_reader implements ClientModInitializer {
     private static boolean wasF5Down = false;
     private static boolean wasF7Down = false;
 
-    // Simple cache for the F7 valuation lookup, keyed off shop_data.csv's
+    // Cache for the F7 valuation lookup, keyed off shop_data.csv's
     // last-modified time so repeated F7 presses in the same session don't
     // re-read/re-parse a potentially large CSV every time. Refreshes
     // automatically whenever ServerShopLogger (or anything else) writes a
     // newer version of the file.
-    private static Map<String, Double> bestBuyPriceCache = null;
+    private static Map<String, BestBuyOffer> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
+
+    /**
+     * Best known BUYING offer for an item: highest price any shop will pay,
+     * plus the owner/warp/location that offered it so the HUD can show
+     * where to sell.
+     */
+    public static final class BestBuyOffer {
+        public final double price;
+        public final String owner;
+        public final String warp;
+        public final String location;
+        public final String stockSpace;
+
+        public BestBuyOffer(double price, String owner, String warp,
+                            String location, String stockSpace) {
+            this.price = price;
+            this.owner = owner != null ? owner : "";
+            this.warp = warp != null ? warp : "";
+            this.location = location != null ? location : "";
+            this.stockSpace = stockSpace != null ? stockSpace : "";
+        }
+    }
 
     @Override
     public void onInitializeClient() {
@@ -170,31 +194,40 @@ public class Container_reader implements ClientModInitializer {
         }
     }
 
-    // ── F7: worth evaluator ──────────────────────────────────────────────────
+    // ── F7: worth evaluator (single-sided best-sell) ─────────────────────────
 
     private void evaluateContainerWorth(HandledScreen<?> screen) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        Map<String, Double> bestPrices = getBestBuyPrices();
+        Map<String, BestBuyOffer> bestOffers = getBestBuyOffers();
 
         double total = 0.0;
-        int pricedStacks = 0;
+        int pricedStacks = 0;   // still counted per physical stack (useful diagnostic)
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
-        List<ContainerWorthHud.Entry> entries = new ArrayList<>();
+
+        // Aggregate by item name so a 54-slot chest of the same block becomes
+        // one HUD row instead of 54. Price/offer is looked up once per name.
+        Map<String, Integer> countByName = new LinkedHashMap<>();
+        Map<String, BestBuyOffer> offerByName = new LinkedHashMap<>();
 
         for (Slot slot : screen.getScreenHandler().slots) {
             ItemStack stack = slot.getStack();
             if (stack.isEmpty()) continue;
 
+            // Vanilla name — matches ServerShopLogger / commodity shops.
+            // (PremiumShopLogger deliberately uses custom display names and
+            // lives in its own history file; it does not participate here.)
             String name = stack.getItem().getName().getString();
-            Double price = bestPrices.get(name);
+            int count = stack.getCount();
 
-            entries.add(new ContainerWorthHud.Entry(name, stack.getCount(), price));
+            countByName.merge(name, count, Integer::sum);
 
-            if (price != null) {
-                total += price * stack.getCount();
+            BestBuyOffer offer = bestOffers.get(name);
+            if (offer != null) {
+                offerByName.putIfAbsent(name, offer);
+                total += offer.price * count;
                 pricedStacks++;
             } else {
                 unpricedStacks++;
@@ -210,9 +243,16 @@ public class Container_reader implements ClientModInitializer {
             return;
         }
 
-        // Highest-value entries first, so if the panel's row cap kicks in
-        // (see ContainerWorthHud.MAX_VISIBLE_ROWS) the most useful rows are
-        // the ones guaranteed to be visible.
+        List<ContainerWorthHud.Entry> entries = new ArrayList<>();
+        for (Map.Entry<String, Integer> e : countByName.entrySet()) {
+            String name = e.getKey();
+            int count = e.getValue();
+            BestBuyOffer offer = offerByName.get(name); // may be null
+            entries.add(new ContainerWorthHud.Entry(name, count, offer));
+        }
+
+        // Highest-value entries first so the panel's row cap keeps the
+        // most useful rows visible.
         entries.sort((a, b) -> Double.compare(b.subtotal, a.subtotal));
         ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries);
 
@@ -228,25 +268,25 @@ public class Container_reader implements ClientModInitializer {
     }
 
     /**
-     * Best (max) known "BUYING" price per item name from shop_data.csv —
-     * i.e. the most any known shop (player or server) will pay you for that
-     * item. Cached and only re-parsed when the file's mtime changes.
+     * Best (max price) known "BUYING" offer per item name from shop_data.csv,
+     * including owner + warp so the HUD can show where to sell.
+     * Cached and only re-parsed when the file's mtime changes.
      *
      * NOTE: this is a quick heads-up estimate, not a stock-aware allocation
      * like profit_finder.py does — it doesn't account for a single shop's
      * remaining buy space possibly being too small to take everything in
      * the container at that price.
      */
-    private static Map<String, Double> getBestBuyPrices() {
+    private static Map<String, BestBuyOffer> getBestBuyOffers() {
         try {
             long modTime = Files.exists(SHOP_DATA_FILE)
                     ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1;
 
-            if (bestBuyPriceCache != null && modTime == cachedFileModTime) {
-                return bestBuyPriceCache;
+            if (bestBuyOfferCache != null && modTime == cachedFileModTime) {
+                return bestBuyOfferCache;
             }
 
-            Map<String, Double> prices = new HashMap<>();
+            Map<String, BestBuyOffer> offers = new HashMap<>();
             if (Files.exists(SHOP_DATA_FILE)) {
                 try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA_FILE)) {
                     String line;
@@ -254,11 +294,16 @@ public class Container_reader implements ClientModInitializer {
                     while ((line = reader.readLine()) != null) {
                         if (isHeader) { isHeader = false; continue; }
                         String[] parts = parseCsvLine(line);
+                        // Shop Location, Shop Owner, Item, Stock/Space, Price, Action, Status, Timestamp, Warp
                         if (parts.length < 7) continue;
 
-                        String item   = parts[2];
-                        String action = parts[5];
-                        String status = parts[6];
+                        String location   = parts[0];
+                        String owner      = parts[1];
+                        String item       = parts[2];
+                        String stockSpace = parts[3];
+                        String action     = parts[5];
+                        String status     = parts[6];
+                        String warp       = parts.length > 8 ? parts[8] : "";
 
                         if (!"BUYING".equalsIgnoreCase(action)) continue;
                         if ("Dead".equalsIgnoreCase(status)) continue;
@@ -270,17 +315,20 @@ public class Container_reader implements ClientModInitializer {
                             continue;
                         }
 
-                        prices.merge(item, price, Math::max);
+                        BestBuyOffer existing = offers.get(item);
+                        if (existing == null || price > existing.price) {
+                            offers.put(item, new BestBuyOffer(price, owner, warp, location, stockSpace));
+                        }
                     }
                 }
             }
 
-            bestBuyPriceCache = prices;
+            bestBuyOfferCache = offers;
             cachedFileModTime = modTime;
-            return prices;
+            return offers;
         } catch (IOException e) {
             System.err.println("[ContainerReader] Failed to load shop_data.csv for valuation: " + e.getMessage());
-            return bestBuyPriceCache != null ? bestBuyPriceCache : new HashMap<>();
+            return bestBuyOfferCache != null ? bestBuyOfferCache : new HashMap<>();
         }
     }
 
