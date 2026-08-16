@@ -129,37 +129,59 @@ public class ContainerWorthScreen extends Screen {
      * SignFinder text search is a substring match ("Stick" hits "Sticky Piston").
      * Use regex mode with word boundaries for an exact item-name token match.
      */
+    /**
+     * Build a SignFinder client command.
+     *
+     * SignFinder registers pattern/query with StringArgumentType.string() — NOT
+     * greedyString(). That means:
+     *   - unquoted values are a single "word" and may not contain ( ) \ etc.
+     *   - multi-word values MUST be wrapped in double quotes
+     *
+     * Regex mode was abandoned: patterns like (?i)\b\QTuff\E\b contain
+     * characters illegal in an unquoted string(), and ClientCommandInternals
+     * often surfaces the command without quotes, which triggers:
+     *   Expected whitespace to end one argument ... at ...ign regex
+     *
+     * Plain text search is substring-based ("Stick" can still match
+     * "Sticky Piston") but is reliable. Multi-word names are quoted.
+     */
     static String buildFindsignCommand(String itemName) {
-        // SignFinder: /findsign regex <pattern> — pattern must be ONE brigadier
-        // argument. Multi-word names (e.g. "Netherite Ingot") require quotes or
-        // the parser stops at the first space:
-        //   Expected whitespace to end one argument ... at ...ign regex
-        // Docs example: /findsign regex "chest|storage" 100
-        //
-        // Text mode is substring ("Stick" hits "Sticky Piston"); regex with
-        // word boundaries avoids that. \Q..\E keeps the name literal.
-        String safe = itemName.replace("\\", "\\\\").replace("\"", "");
-        String pattern = "(?i)\\b\\Q" + safe + "\\E\\b";
-        return "findsign regex \"" + pattern + "\"";
+        String safe = itemName == null ? "" : itemName.replace("\"", "").trim();
+        if (safe.isEmpty()) return "findsign";
+        // Always quote — works for both "Tuff" and "Netherite Ingot"
+        // and is the form SignFinder's own help recommends for special text.
+        return "findsign \"" + safe + "\"";
     }
 
     static void runFindsignNow(String commandWithoutSlash) {
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc == null) return;
 
-        // Prefer Fabric's client-command executor when present
+        System.out.println("[ContainerReader] findsign exec: " + commandWithoutSlash);
+
+        // 1) Fabric client-command executor (keeps quotes if the impl is correct)
         try {
             Class<?> internals = Class.forName(
                     "net.fabricmc.fabric.impl.command.client.ClientCommandInternals");
             var method = internals.getMethod("executeCommand", String.class);
             Object ok = method.invoke(null, commandWithoutSlash);
-            if (ok instanceof Boolean b && b) return;
-        } catch (Throwable ignored) {
-            // fall through
+            if (ok instanceof Boolean b && b) {
+                return;
+            }
+        } catch (Throwable t) {
+            System.out.println("[ContainerReader] ClientCommandInternals failed: " + t);
         }
 
-        // Fallback: open chat pre-filled (user presses Enter)
-        mc.setScreen(new ChatScreen("/" + commandWithoutSlash, false));
+        // 2) Fallback: open chat pre-filled. User presses Enter.
+        //    This path preserves quotes reliably.
+        try {
+            mc.setScreen(new ChatScreen("/" + commandWithoutSlash, false));
+        } catch (Throwable t) {
+            if (mc.player != null) {
+                mc.player.sendMessage(Text.literal(
+                        "§e[ContainerReader] Run manually: §f/" + commandWithoutSlash), false);
+            }
+        }
     }
 
     private static String normalizeWarp(String warp) {
