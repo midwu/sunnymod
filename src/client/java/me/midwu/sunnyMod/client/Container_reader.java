@@ -112,6 +112,8 @@ public class Container_reader implements ClientModInitializer {
         }
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            // Deferred SignFinder search after a warp from the worth screen
+            ContainerWorthScreen.PendingFindsign.tick();
             long windowHandle = client.getWindow().getHandle();
 
             boolean isF5Down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F5) == GLFW.GLFW_PRESS;
