@@ -32,11 +32,10 @@ import java.util.regex.Pattern;
  * upsert-by-key semantics so reopening /ah does not create duplicates.
  *
  * Listing identity (no stable id in lore):
- *   seller | itemId | displayName | listingType | price
+ *   seller | itemId | displayName | listingType
  *
  * Time Left is stored but never part of the key (it ticks down).
- *
- * Also exposes helpers used by F7 AH profit comparison.
+ * Price is NOT in the key so BID updates don't create duplicate rows.
  */
 public class AuctionHouseLogger implements ClientModInitializer {
 
@@ -53,10 +52,8 @@ public class AuctionHouseLogger implements ClientModInitializer {
   private static final String HISTORY_HEADER =
           "Timestamp,ListingKey,ItemId,DisplayName,Seller,ListingType,OldPrice,NewPrice,TimeLeft";
 
-  /** Matches screen title (exact). */
   static final String AH_TITLE = "Auction House";
 
-  // Lore field extractors
   private static final Pattern SELLER = Pattern.compile("Seller:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
   private static final Pattern BUY_NOW = Pattern.compile("Buy Now:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
   private static final Pattern CURRENT = Pattern.compile("Current Price:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
@@ -64,11 +61,9 @@ public class AuctionHouseLogger implements ClientModInitializer {
   private static final Pattern HIGHEST = Pattern.compile("Highest Bidder:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
   private static final Pattern TIME_LEFT = Pattern.compile("Time Left:\\s*([^|]+)", Pattern.CASE_INSENSITIVE);
 
-  /** Delayed capture after AH opens (slots empty on AFTER_INIT). */
   private static HandledScreen<?> pendingScreen = null;
   private static int pendingTicks = 0;
 
-  /** Parsed listing for in-memory use (F7 + file write). */
   public static final class Listing {
     public final String listingKey;
     public final String itemId;
@@ -110,7 +105,6 @@ public class AuctionHouseLogger implements ClientModInitializer {
     ScreenEvents.AFTER_INIT.register((client, screen, w, h) -> {
       if (!(screen instanceof HandledScreen<?> handled)) return;
       if (!isAuctionHouse(screen.getTitle().getString())) return;
-      // Delay a few ticks so listing slots are populated by the server.
       pendingScreen = handled;
       pendingTicks = 5;
     });
@@ -143,13 +137,11 @@ public class AuctionHouseLogger implements ClientModInitializer {
   }
 
   public static boolean isAuctionHouse(String title) {
-    return title != null && title.trim().equalsIgnoreCase(AH_TITLE);
+    if (title == null) return false;
+    String t = title.replaceAll("§.", "").trim();
+    return t.equalsIgnoreCase(AH_TITLE) || t.toLowerCase(Locale.ROOT).contains("auction house");
   }
 
-  /**
-   * Parse all listing slots from the open AH screen.
-   * Skips UI chrome (glass panes, nav buttons, empty lore without Seller).
-   */
   public static List<Listing> parseListings(HandledScreen<?> screen) {
     MinecraftClient client = MinecraftClient.getInstance();
     List<Listing> out = new ArrayList<>();
@@ -159,7 +151,6 @@ public class AuctionHouseLogger implements ClientModInitializer {
       ItemStack stack = slot.getStack();
       if (stack.isEmpty()) continue;
 
-      // Skip obvious UI filler
       String id = String.valueOf(stack.getItem());
       if (id.contains("stained_glass_pane") || id.contains("black_stained_glass")) continue;
 
@@ -175,7 +166,6 @@ public class AuctionHouseLogger implements ClientModInitializer {
       }
       String lore = loreSb.toString();
 
-      // Real listings always have a Seller line
       Matcher sm = SELLER.matcher(lore);
       if (!sm.find()) continue;
       String seller = sm.group(1).trim();
@@ -191,7 +181,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
         listingType = "BID";
         price = parseMoney(cp.group(1));
       } else {
-        continue; // no price → not a listing
+        continue;
       }
 
       double bidInc = 0;
@@ -208,7 +198,6 @@ public class AuctionHouseLogger implements ClientModInitializer {
 
       String vanillaName = stack.getItem().getName().getString();
       int count = stack.getCount();
-
       String key = buildKey(seller, id, displayName, listingType, price);
 
       out.add(new Listing(key, id, displayName, vanillaName, count,
@@ -217,10 +206,10 @@ public class AuctionHouseLogger implements ClientModInitializer {
     return out;
   }
 
+  /** Price is intentionally not part of the key (BID prices move). */
   public static String buildKey(String seller, String itemId, String displayName,
                                 String listingType, double price) {
-    return seller + "|" + itemId + "|" + displayName + "|" + listingType + "|" +
-            String.format(Locale.US, "%.2f", price);
+    return seller + "|" + itemId + "|" + displayName + "|" + listingType;
   }
 
   private static double parseMoney(String raw) {
@@ -231,36 +220,56 @@ public class AuctionHouseLogger implements ClientModInitializer {
     }
   }
 
-  /**
-   * Upsert listings into auction_house.csv.
-   * Returns number of rows that were new or had a price change recorded.
-   */
   public static int upsertListings(List<Listing> listings) throws IOException {
     Files.createDirectories(CONFIG_DIR);
     Map<String, String[]> existing = loadExisting();
     String now = LocalDateTime.now().format(TS);
     int touched = 0;
+    List<String> historyLines = new ArrayList<>();
 
     for (Listing L : listings) {
       String[] prev = existing.get(L.listingKey);
       if (prev == null) {
-        // brand new
         existing.put(L.listingKey, toRow(L, now, now));
         touched++;
       } else {
-        // same key → refresh LastSeen + TimeLeft; detect price drift
-        // (price is in the key, so drift only happens if seller re-lists
-        // at a different price which creates a *new* key — history is
-        // for when we later change the key scheme, or for soft matches)
-        String firstSeen = prev[11]; // FirstSeen column
+        String firstSeen = prev.length > 11 ? prev[11] : now;
+        double oldPrice = 0;
+        try {
+          oldPrice = Double.parseDouble(prev[7].replace(",", ""));
+        } catch (Exception ignored) {}
+        if (Math.abs(oldPrice - L.price) > 0.001) {
+          historyLines.add(String.join(",",
+                  escape(now),
+                  escape(L.listingKey),
+                  escape(L.itemId),
+                  escape(L.displayName),
+                  escape(L.seller),
+                  L.listingType,
+                  String.format(Locale.US, "%.2f", oldPrice),
+                  String.format(Locale.US, "%.2f", L.price),
+                  escape(L.timeLeft)));
+          touched++;
+        }
         existing.put(L.listingKey, toRow(L, firstSeen, now));
-        // still counts as an update of the live snapshot
-        touched++;
       }
     }
 
-    // Write full table (live snapshot of everything we've ever seen that
-    // still matches a key — expired listings stay until pruned later)
+    if (!historyLines.isEmpty()) {
+      boolean needHistHeader = !Files.exists(AH_HISTORY_FILE);
+      try (BufferedWriter hw = Files.newBufferedWriter(AH_HISTORY_FILE,
+              StandardOpenOption.CREATE, StandardOpenOption.APPEND)) {
+        if (needHistHeader) {
+          hw.write(HISTORY_HEADER);
+          hw.newLine();
+        }
+        for (String hl : historyLines) {
+          hw.write(hl);
+          hw.newLine();
+        }
+      }
+    }
+
     try (BufferedWriter w = Files.newBufferedWriter(AH_FILE,
             StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING)) {
       w.write(HEADER);
@@ -295,7 +304,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
     Map<String, String[]> map = new LinkedHashMap<>();
     if (!Files.exists(AH_FILE)) return map;
     try (BufferedReader br = Files.newBufferedReader(AH_FILE)) {
-      String line = br.readLine(); // header
+      String line = br.readLine();
       while ((line = br.readLine()) != null) {
         if (line.isBlank()) continue;
         String[] parts = parseCsvLine(line);

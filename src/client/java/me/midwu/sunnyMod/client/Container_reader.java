@@ -131,11 +131,15 @@ public class Container_reader implements ClientModInitializer {
             boolean isF7Down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F7) == GLFW.GLFW_PRESS;
             if (isF7Down && !wasF7Down) {
                 if (client.currentScreen instanceof HandledScreen<?> handledScreen) {
-                    evaluateContainerWorth(handledScreen);
+                    String title = handledScreen.getTitle().getString();
+                    if (AuctionHouseLogger.isAuctionHouse(title)) {
+                        evaluateAuctionHouse(handledScreen);
+                    } else {
+                        evaluateContainerWorth(handledScreen);
+                    }
                 } else if (client.currentScreen instanceof ContainerWorthScreen) {
                     // Already open — ignore
                 } else if (client.player != null) {
-                    // Outside a container: reopen last results if any
                     if (ContainerWorthHud.hasResults()) {
                         client.setScreen(new ContainerWorthScreen(
                                 ContainerWorthHud.getEntries(),
@@ -214,6 +218,100 @@ public class Container_reader implements ClientModInitializer {
             client.player.sendMessage(Text.literal(
                     "§7[ContainerReader] Full path: §f" + DUMP_FILE.toAbsolutePath()), false);
         }
+    }
+    private void evaluateAuctionHouse(HandledScreen<?> screen) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null) return;
+
+        List<AuctionHouseLogger.Listing> listings = AuctionHouseLogger.parseListings(screen);
+        try {
+            int touched = AuctionHouseLogger.upsertListings(listings);
+            client.player.sendMessage(Text.literal(
+                    "§a[AuctionHouse] §f" + listings.size() + " §alistings (file §f" +
+                            touched + " §arows touched)"), false);
+        } catch (Exception e) {
+            client.player.sendMessage(Text.literal(
+                    "§c[AuctionHouse] Failed to save: " + e.getMessage()), false);
+        }
+
+        if (listings.isEmpty()) {
+            client.player.sendMessage(Text.literal(
+                    "§e[AuctionHouse] No listings parsed — empty page or UI-only slots?"), false);
+            return;
+        }
+
+        Map<String, BestBuyOffer> buyOffers = loadBestOffersByAction("BUYING");
+        Map<String, BestBuyOffer> sellOffers = loadBestOffersByAction("SELLING");
+
+        int matched = 0;
+        List<String> lines = new ArrayList<>();
+        for (AuctionHouseLogger.Listing L : listings) {
+            BestBuyOffer shopBuys = buyOffers.get(L.vanillaName);
+            if (shopBuys == null) shopBuys = buyOffers.get(L.displayName);
+            BestBuyOffer shopSells = sellOffers.get(L.vanillaName);
+            if (shopSells == null) shopSells = sellOffers.get(L.displayName);
+
+            if (shopBuys != null && shopBuys.price > L.price) {
+                double profit = (shopBuys.price - L.price) * L.count;
+                matched++;
+                lines.add(String.format(java.util.Locale.US,
+                        "§aAH→Shop §f%s §7x%d §fx §f$%,.0f §7→ shop pays §f$%,.2f §a(+ $%,.2f) §7@%s %s",
+                        L.displayName, L.count, L.price, shopBuys.price, profit,
+                        shopBuys.owner.isEmpty() ? "?" : shopBuys.owner,
+                        shopBuys.warp.isEmpty() ? "" : "/" + shopBuys.warp.replaceFirst("^/+", "")));
+            }
+            if (shopSells != null && L.price < shopSells.price) {
+                double save = (shopSells.price - L.price) * L.count;
+                matched++;
+                lines.add(String.format(java.util.Locale.US,
+                        "§bAH cheaper than shop §f%s §7x%d §fAH $%,.0f §7< shop sells §f$%,.2f §b(save $%,.2f)",
+                        L.displayName, L.count, L.price, shopSells.price, save));
+            }
+        }
+
+        if (lines.isEmpty()) {
+            client.player.sendMessage(Text.literal(
+                    "§7[AuctionHouse] No shop_data matches with edge on this page " +
+                            "(common for custom/OP items). " + listings.size() + " listings scanned."), false);
+        } else {
+            client.player.sendMessage(Text.literal(
+                    "§a[AuctionHouse] §f" + matched + " §aopportunity line(s):"), false);
+            for (String line : lines) {
+                client.player.sendMessage(Text.literal(line), false);
+            }
+        }
+    }
+
+    private static Map<String, BestBuyOffer> loadBestOffersByAction(String actionWanted) {
+        Map<String, BestBuyOffer> best = new HashMap<>();
+        if (!Files.exists(SHOP_DATA_FILE)) return best;
+        try (BufferedReader br = Files.newBufferedReader(SHOP_DATA_FILE)) {
+            String line = br.readLine();
+            while ((line = br.readLine()) != null) {
+                if (line.isBlank()) continue;
+                String[] p = parseCsvLine(line);
+                if (p.length < 7) continue;
+                if (!actionWanted.equalsIgnoreCase(p[5])) continue;
+                if ("Dead".equalsIgnoreCase(p[6])) continue;
+                double price;
+                try { price = Double.parseDouble(p[4]); }
+                catch (NumberFormatException e) { continue; }
+                String item = p[2];
+                String owner = p[1];
+                String location = p[0];
+                String stock = p[3];
+                String warp = p.length > 8 ? p[8] : "";
+                BestBuyOffer existing = best.get(item);
+                boolean better = existing == null ||
+                        ("BUYING".equalsIgnoreCase(actionWanted) ? price > existing.price : price < existing.price);
+                if (better) {
+                    best.put(item, new BestBuyOffer(price, owner, warp, location, stock));
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("[AuctionHouse] shop_data read failed: " + e.getMessage());
+        }
+        return best;
     }
 
     // ── F7: worth evaluator (single-sided best-sell) ─────────────────────────
