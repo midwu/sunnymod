@@ -7,15 +7,11 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Renders the F7 container-worth breakdown as a HUD panel, same pattern as
- * ShopSignHud — a plain static utility, driven by Container_reader.update()
- * and drawn by Hud.renderHud() alongside the other panels.
+ * Compact HUD panel for F7 container-worth results.
  *
- * Shows one row per distinct item name (identical stacks are merged), sorted
- * by value descending. Each priced row includes the best buyer (owner) and
- * warp when known, so you can see where to sell without leaving the chest.
- * Capped at MAX_VISIBLE_ROWS; anything beyond is collapsed into a "+N more"
- * summary line.
+ * Kept deliberately small: header + total value + one row per item showing
+ * only "name  →  warp". Full price breakdown and clickable warps live in
+ * chat (see Container_reader.evaluateContainerWorth).
  */
 public class ContainerWorthHud {
 
@@ -24,10 +20,9 @@ public class ContainerWorthHud {
         public final int count;
         public final Double unitPrice; // null = no known price
         public final double subtotal;  // 0 if unitPrice is null
-        public final String owner;     // best buyer, may be empty
-        public final String warp;      // e.g. "/warp foo", may be empty
+        public final String owner;
+        public final String warp;
 
-        /** Preferred constructor — takes the full BestBuyOffer (or null). */
         public Entry(String name, int count, Container_reader.BestBuyOffer offer) {
             this.name = name;
             this.count = count;
@@ -44,7 +39,6 @@ public class ContainerWorthHud {
             }
         }
 
-        /** Back-compat constructor used only if something still passes a bare price. */
         public Entry(String name, int count, Double unitPrice) {
             this.name = name;
             this.count = count;
@@ -55,7 +49,7 @@ public class ContainerWorthHud {
         }
     }
 
-    private static final int MAX_VISIBLE_ROWS = 20;
+    private static final int MAX_VISIBLE_ROWS = 14;
 
     private static volatile double total = 0.0;
     private static volatile int pricedStacks = 0;
@@ -77,9 +71,10 @@ public class ContainerWorthHud {
 
     public static int getPanelHeight() {
         List<Entry> snapshot = entries;
-        int rows = Math.max(Math.min(snapshot.size(), MAX_VISIBLE_ROWS), 1); // at least 1 for "no priced items"
+        int rows = Math.max(Math.min(snapshot.size(), MAX_VISIBLE_ROWS), 1);
         boolean hasMore = snapshot.size() > MAX_VISIBLE_ROWS;
-        int lineCount = 1 /* header */ + 1 /* total */ + rows + (hasMore ? 1 : 0);
+        // header + total + rows + optional "+N more"
+        int lineCount = 1 + 1 + rows + (hasMore ? 1 : 0);
         return Hud.PADDING + (lineCount * Hud.LINE_HEIGHT) + Hud.PADDING;
     }
 
@@ -90,78 +85,61 @@ public class ContainerWorthHud {
         int cursor = y + Hud.PADDING;
 
         ctx.fill(x, y, x + Hud.PANEL_WIDTH, y + h, 0xAA000000);
-        ctx.drawText(client.textRenderer, "Container Worth", textX, cursor, 0xFFFFD700, true);
+        ctx.drawText(client.textRenderer, "Chest Worth", textX, cursor, 0xFFFFD700, true);
         cursor += Hud.LINE_HEIGHT + 2;
         ctx.fill(x + 2, cursor, x + Hud.PANEL_WIDTH - 2, cursor + 1, 0xFF444444);
         cursor += 4;
 
-        String totalLine = "Total: $" + String.format(Locale.US, "%,.2f", total) +
-                " (" + pricedStacks + "p/" + unpricedStacks + "u)";
+        // Always show total value of the chest
+        String totalLine = "Total: $" + String.format(Locale.US, "%,.2f", total);
         ctx.drawText(client.textRenderer, totalLine, textX, cursor, 0xFFFFFFFF, true);
         cursor += Hud.LINE_HEIGHT;
 
         if (snapshot.isEmpty()) {
-            ctx.drawText(client.textRenderer, "Press F7 in a container", textX, cursor, 0xFFAAAAAA, true);
+            ctx.drawText(client.textRenderer, "Press F7 in a chest", textX, cursor, 0xFFAAAAAA, true);
             return;
         }
 
         int shown = Math.min(snapshot.size(), MAX_VISIBLE_ROWS);
         for (int i = 0; i < shown; i++) {
             Entry e = snapshot.get(i);
-            String right;
-            if (e.unitPrice != null) {
-                right = "$" + String.format(Locale.US, "%,.2f", e.subtotal);
-                // Prefer a short owner tag; fall back to warp if owner is empty
-                // (e.g. some edge cases) or is the synthetic server marker.
-                String where = formatWhere(e.owner, e.warp);
-                if (!where.isEmpty()) {
-                    right = right + " " + where;
-                }
-            } else {
-                right = "no price";
+            // Simple row: "Tuff x3456  /warp sale"  (or "no warp" / "no price")
+            String left = e.name + " x" + e.count;
+            String right = shortWarp(e.warp);
+            if (right.isEmpty()) {
+                right = (e.unitPrice != null) ? "@" + shortOwner(e.owner) : "—";
             }
 
-            String left = e.name + " x" + e.count;
             String line = truncate(client, left, right);
             int color = (e.unitPrice != null) ? 0xFFFFFFFF : 0xFF888888;
-            ctx.drawText(client.textRenderer, line + " - " + right, textX, cursor, color, true);
+            ctx.drawText(client.textRenderer, line + "  " + right, textX, cursor, color, true);
             cursor += Hud.LINE_HEIGHT;
         }
 
         if (snapshot.size() > MAX_VISIBLE_ROWS) {
-            int hiddenCount = snapshot.size() - MAX_VISIBLE_ROWS;
-            double hiddenValue = 0;
-            for (int i = MAX_VISIBLE_ROWS; i < snapshot.size(); i++) hiddenValue += snapshot.get(i).subtotal;
-            String moreLine = "+" + hiddenCount + " more ($" + String.format(Locale.US, "%,.2f", hiddenValue) + ")";
-            ctx.drawText(client.textRenderer, moreLine, textX, cursor, 0xFFAAAAAA, true);
+            int hidden = snapshot.size() - MAX_VISIBLE_ROWS;
+            ctx.drawText(client.textRenderer, "+" + hidden + " more (see chat)", textX, cursor, 0xFFAAAAAA, true);
         }
     }
 
-    /**
-     * Compact "where to sell" tag.
-     * - "__server__" → "@server"
-     * - normal player → "@Name"
-     * - if warp present and owner is blank → the warp itself
-     * - otherwise empty
-     */
-    private static String formatWhere(String owner, String warp) {
-        if (owner != null && !owner.isEmpty()) {
-            if ("__server__".equals(owner)) return "@server";
-            // Keep it short for the 160px panel
-            String shortOwner = owner.length() > 12 ? owner.substring(0, 11) + "…" : owner;
-            return "@" + shortOwner;
-        }
-        if (warp != null && !warp.isEmpty()) {
-            // warp is often stored as "/warp name"
-            String w = warp.startsWith("/warp ") ? warp.substring(6) : warp;
-            if (w.length() > 12) w = w.substring(0, 11) + "…";
-            return "/" + w;
-        }
-        return "";
+    private static String shortWarp(String warp) {
+        if (warp == null || warp.isBlank()) return "";
+        String w = warp.trim();
+        if (w.startsWith("/warp ")) w = w.substring(6);
+        else if (w.startsWith("warp ")) w = w.substring(5);
+        else if (w.startsWith("/")) w = w.substring(1);
+        if (w.length() > 14) w = w.substring(0, 13) + "…";
+        return "/" + w;
     }
 
-    private static String truncate(MinecraftClient client, String text, String priceText) {
-        int max = Hud.PANEL_WIDTH - Hud.PADDING * 2 - client.textRenderer.getWidth(" - " + priceText);
+    private static String shortOwner(String owner) {
+        if (owner == null || owner.isEmpty()) return "?";
+        if ("__server__".equals(owner)) return "server";
+        return owner.length() > 12 ? owner.substring(0, 11) + "…" : owner;
+    }
+
+    private static String truncate(MinecraftClient client, String text, String right) {
+        int max = Hud.PANEL_WIDTH - Hud.PADDING * 2 - client.textRenderer.getWidth("  " + right);
         if (client.textRenderer.getWidth(text) <= max) return text;
         while (!text.isEmpty() && client.textRenderer.getWidth(text + "…") > max)
             text = text.substring(0, text.length() - 1);
