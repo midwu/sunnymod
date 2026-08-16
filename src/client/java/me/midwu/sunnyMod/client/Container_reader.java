@@ -4,6 +4,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
+import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.tooltip.TooltipType;
@@ -207,34 +208,26 @@ public class Container_reader implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        // Force a fresh load summary every F7 so diagnostics stay accurate.
         Map<String, BestBuyOffer> bestOffers = getBestBuyOffers();
 
-        // ── Diagnostic block (always shown while we're debugging) ───────────
-        client.player.sendMessage(Text.literal(
-                "§7[ContainerReader] shop_data path: §f" + SHOP_DATA_FILE.toAbsolutePath()), false);
-        client.player.sendMessage(Text.literal(
-                "§7[ContainerReader] " + lastLoadSummary +
-                        (lastLoadFromCache ? " §8(cache hit)" : " §8(re-parsed)")), false);
-
         double total = 0.0;
-        int pricedStacks = 0;   // still counted per physical stack (useful diagnostic)
+        int pricedStacks = 0;
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
-        List<String> matchedSamples = new ArrayList<>(); // first few hits for feedback
 
-        // Aggregate by item name so a 54-slot chest of the same block becomes
-        // one HUD row instead of 54. Price/offer is looked up once per name.
+        // Aggregate by item name (container slots only — skip player inventory).
         Map<String, Integer> countByName = new LinkedHashMap<>();
         Map<String, BestBuyOffer> offerByName = new LinkedHashMap<>();
 
         for (Slot slot : screen.getScreenHandler().slots) {
+            // HandledScreen includes the player's 36 inv slots at the bottom.
+            // Only value the actual container/chest portion.
+            if (slot.inventory instanceof PlayerInventory) continue;
+
             ItemStack stack = slot.getStack();
             if (stack.isEmpty()) continue;
 
             // Vanilla name — matches ServerShopLogger / commodity shops.
-            // (PremiumShopLogger deliberately uses custom display names and
-            // lives in its own history file; it does not participate here.)
             String name = stack.getItem().getName().getString();
             int count = stack.getCount();
 
@@ -245,13 +238,9 @@ public class Container_reader implements ClientModInitializer {
                 offerByName.putIfAbsent(name, offer);
                 total += offer.price * count;
                 pricedStacks++;
-                if (matchedSamples.size() < 3 && !matchedSamples.contains(name)) {
-                    matchedSamples.add(name + " → $" + String.format(Locale.US, "%,.2f", offer.price)
-                            + " @" + (offer.owner.isEmpty() ? "?" : offer.owner));
-                }
             } else {
                 unpricedStacks++;
-                if (!missingItems.contains(name) && missingItems.size() < 8) {
+                if (!missingItems.contains(name) && missingItems.size() < 6) {
                     missingItems.add(name);
                 }
             }
@@ -263,61 +252,36 @@ public class Container_reader implements ClientModInitializer {
             return;
         }
 
-        // Show the exact lookup keys the container produced (helps spot
-        // translation / display-name mismatches against the CSV).
-        List<String> containerKeys = new ArrayList<>(countByName.keySet());
-        int keyPreview = Math.min(containerKeys.size(), 6);
-        client.player.sendMessage(Text.literal(
-                "§7[ContainerReader] Container keys (" + containerKeys.size() + " distinct): §f" +
-                        String.join("§7, §f", containerKeys.subList(0, keyPreview)) +
-                        (containerKeys.size() > keyPreview ? "§7, …" : "")), false);
-
         List<ContainerWorthHud.Entry> entries = new ArrayList<>();
         for (Map.Entry<String, Integer> e : countByName.entrySet()) {
             String name = e.getKey();
             int count = e.getValue();
-            BestBuyOffer offer = offerByName.get(name); // may be null
+            BestBuyOffer offer = offerByName.get(name);
             entries.add(new ContainerWorthHud.Entry(name, count, offer));
         }
 
-        // Highest-value entries first so the panel's row cap keeps the
-        // most useful rows visible.
         entries.sort((a, b) -> Double.compare(b.subtotal, a.subtotal));
         ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries);
 
-        String msg = "§a[ContainerReader] Estimated worth: §f$" + String.format(Locale.US, "%,.2f", total) +
-                " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s))" +
-                " §8[" + countByName.size() + " distinct items] — see HUD";
-        client.player.sendMessage(Text.literal(msg), false);
-
-        if (!matchedSamples.isEmpty()) {
-            client.player.sendMessage(Text.literal(
-                    "§a[ContainerReader] Matched: §f" + String.join("§7 | §f", matchedSamples)), false);
-        }
+        // One-line chat summary; full interactive breakdown is on the screen.
+        client.player.sendMessage(Text.literal(
+                "§a[ContainerReader] Chest worth: §f$" + String.format(Locale.US, "%,.2f", total) +
+                        " §7(" + countByName.size() + " items, " +
+                        pricedStacks + " priced / " + unpricedStacks + " unpriced stacks)"), false);
 
         if (!missingItems.isEmpty()) {
-            String extra = missingItems.size() >= 8 ? "§7, …" : "";
             client.player.sendMessage(Text.literal(
-                    "§e[ContainerReader] No BUYING price for: §f" + String.join("§7, §f", missingItems) + extra), false);
+                    "§eNo BUYING price for: §f" + String.join("§7, §f", missingItems) +
+                            (unpricedStacks > missingItems.size() ? "§7, …" : "")), false);
         }
 
         if (pricedStacks == 0 && bestOffers.isEmpty()) {
             client.player.sendMessage(Text.literal(
-                    "§c[ContainerReader] No BUYING offers loaded at all. Open a server sell menu " +
-                            "(\"Sell Your Blocks!\" etc.) or scan player shops so shop_data.csv gets rows."), false);
-        } else if (pricedStacks == 0 && !bestOffers.isEmpty()) {
-            // Offers exist but nothing in this container matched — show a few CSV keys.
-            List<String> csvSample = new ArrayList<>();
-            int n = 0;
-            for (String k : bestOffers.keySet()) {
-                csvSample.add(k);
-                if (++n >= 5) break;
-            }
-            client.player.sendMessage(Text.literal(
-                    "§e[ContainerReader] CSV has §f" + bestOffers.size() +
-                            " §eBUYING keys but none matched this container. Sample CSV keys: §f" +
-                            String.join("§7, §f", csvSample)), false);
+                    "§cNo BUYING offers loaded. Open a server sell menu or scan player shops first."), false);
         }
+
+        // Open the interactive screen (real warp buttons). Closes the chest GUI.
+        client.setScreen(new ContainerWorthScreen(entries, total, pricedStacks, unpricedStacks));
     }
 
     /**
