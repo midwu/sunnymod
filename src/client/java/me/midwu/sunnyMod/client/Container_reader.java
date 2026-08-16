@@ -74,7 +74,8 @@ public class Container_reader implements ClientModInitializer {
     // re-read/re-parse a potentially large CSV every time. Refreshes
     // automatically whenever ServerShopLogger (or anything else) writes a
     // newer version of the file.
-    private static Map<String, BestBuyOffer> bestBuyOfferCache = null;
+    /** All BUYING offers per item name, each list sorted by price descending. */
+    private static Map<String, java.util.List<BestBuyOffer>> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
 
     // Last load diagnostics (filled by getBestBuyOffers, shown on F7).
@@ -221,7 +222,7 @@ public class Container_reader implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        Map<String, BestBuyOffer> bestOffers = getBestBuyOffers();
+        Map<String, java.util.List<BestBuyOffer>> allOffers = getAllBuyOffers();
 
         double total = 0.0;
         int pricedStacks = 0;
@@ -230,7 +231,6 @@ public class Container_reader implements ClientModInitializer {
 
         // Aggregate by item name (container slots only — skip player inventory).
         Map<String, Integer> countByName = new LinkedHashMap<>();
-        Map<String, BestBuyOffer> offerByName = new LinkedHashMap<>();
 
         for (Slot slot : screen.getScreenHandler().slots) {
             // HandledScreen includes the player's 36 inv slots at the bottom.
@@ -243,34 +243,64 @@ public class Container_reader implements ClientModInitializer {
             // Vanilla name — matches ServerShopLogger / commodity shops.
             String name = stack.getItem().getName().getString();
             int count = stack.getCount();
-
             countByName.merge(name, count, Integer::sum);
-
-            BestBuyOffer offer = bestOffers.get(name);
-            if (offer != null) {
-                offerByName.putIfAbsent(name, offer);
-                total += offer.price * count;
-                pricedStacks++;
-            } else {
-                unpricedStacks++;
-                if (!missingItems.contains(name) && missingItems.size() < 6) {
-                    missingItems.add(name);
-                }
-            }
         }
 
-        if (pricedStacks == 0 && unpricedStacks == 0) {
+        if (countByName.isEmpty()) {
             client.player.sendMessage(Text.literal(
                     "§e[ContainerReader] Container is empty — nothing to value."), false);
             return;
         }
 
+        // Allocate each item across shops (highest price first) until the
+        // chest amount is covered or no more buy-space remains.
         List<ContainerWorthHud.Entry> entries = new ArrayList<>();
         for (Map.Entry<String, Integer> e : countByName.entrySet()) {
             String name = e.getKey();
-            int count = e.getValue();
-            BestBuyOffer offer = offerByName.get(name);
-            entries.add(new ContainerWorthHud.Entry(name, count, offer));
+            int containerCount = e.getValue();
+            java.util.List<BestBuyOffer> offers = allOffers.getOrDefault(name, java.util.List.of());
+
+            if (offers.isEmpty()) {
+                unpricedStacks++; // counted once per distinct item for summary
+                if (missingItems.size() < 6) missingItems.add(name);
+                entries.add(ContainerWorthHud.Entry.unsellable(name, containerCount));
+                continue;
+            }
+
+            int remaining = containerCount;
+            boolean anyPriced = false;
+            for (BestBuyOffer offer : offers) {
+                if (remaining <= 0) break;
+                int space = parseShopSpace(offer.stockSpace);
+                int take;
+                if (space < 0) {
+                    // Unknown capacity — treat as able to take the rest
+                    take = remaining;
+                } else if (space == 0) {
+                    continue; // shop full
+                } else {
+                    take = Math.min(remaining, space);
+                }
+                if (take <= 0) continue;
+
+                entries.add(new ContainerWorthHud.Entry(
+                        name, take, containerCount, offer, space));
+                total += offer.price * take;
+                remaining -= take;
+                anyPriced = true;
+            }
+
+            if (anyPriced) {
+                pricedStacks++; // distinct items with at least one priced leg
+            }
+            if (remaining > 0) {
+                // Leftover with no more shops — same treatment as "no price"
+                unpricedStacks++;
+                entries.add(ContainerWorthHud.Entry.unsellable(name, remaining, containerCount));
+                if (!missingItems.contains(name) && missingItems.size() < 6) {
+                    missingItems.add(name + " (partial)");
+                }
+            }
         }
 
         entries.sort((a, b) -> Double.compare(b.subtotal, a.subtotal));
@@ -302,56 +332,45 @@ public class Container_reader implements ClientModInitializer {
     }
 
     /**
-     * Best (max price) known "BUYING" offer per item name from shop_data.csv,
-     * including owner + warp so the HUD can show where to sell.
-     * Cached and only re-parsed when the file's mtime changes.
-     *
-     * NOTE: this is a quick heads-up estimate, not a stock-aware allocation
-     * like profit_finder.py does — it doesn't account for a single shop's
-     * remaining buy space possibly being too small to take everything in
-     * the container at that price.
+     * All active BUYING offers per item name from shop_data.csv, each list
+     * sorted by price descending. Deduplicated by owner+warp+location
+     * (keeps the higher price). Used for stock-aware multi-shop allocation.
      */
-    private static Map<String, BestBuyOffer> getBestBuyOffers() {
+    private static Map<String, java.util.List<BestBuyOffer>> getAllBuyOffers() {
         try {
             boolean exists = Files.exists(SHOP_DATA_FILE);
-            long modTime = exists ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1;
+            long modTime = exists ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1L;
 
             if (bestBuyOfferCache != null && modTime == cachedFileModTime) {
                 lastLoadFromCache = true;
-                // lastLoadSummary already set from the previous parse
                 return bestBuyOfferCache;
             }
-
             lastLoadFromCache = false;
-            Map<String, BestBuyOffer> offers = new HashMap<>();
-            int totalRows = 0;
-            int buyingRows = 0;
-            int deadSkipped = 0;
-            int badPrice = 0;
-            int shortRows = 0;
 
             if (!exists) {
                 lastLoadSummary = "shop_data.csv §cMISSING§7 — expected at config/sunnyMod/";
-                bestBuyOfferCache = offers;
+                Map<String, java.util.List<BestBuyOffer>> empty = new HashMap<>();
+                bestBuyOfferCache = empty;
                 cachedFileModTime = modTime;
-                return offers;
+                return empty;
             }
 
+            // item -> (shopKey -> best offer for that shop)
+            Map<String, Map<String, BestBuyOffer>> byItem = new HashMap<>();
+            int totalRows = 0, buyingRows = 0, deadSkipped = 0, badPrice = 0, shortRows = 0;
             long fileBytes = Files.size(SHOP_DATA_FILE);
 
-            try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA_FILE)) {
-                String line;
-                boolean isHeader = true;
-                while ((line = reader.readLine()) != null) {
-                    if (isHeader) { isHeader = false; continue; }
+            try (BufferedReader br = Files.newBufferedReader(SHOP_DATA_FILE)) {
+                String line = br.readLine(); // header
+                while ((line = br.readLine()) != null) {
                     totalRows++;
+                    if (line.isBlank()) continue;
                     String[] parts = parseCsvLine(line);
-                    // Shop Location, Shop Owner, Item, Stock/Space, Price, Action, Status, Timestamp, Warp
                     if (parts.length < 7) {
                         shortRows++;
                         continue;
                     }
-
+                    // Shop Location, Shop Owner, Item, Stock/Space, Price, Action, Status, Timestamp, Warp
                     String location   = parts[0];
                     String owner      = parts[1];
                     String item       = parts[2];
@@ -375,16 +394,25 @@ public class Container_reader implements ClientModInitializer {
                     }
 
                     buyingRows++;
-                    BestBuyOffer existing = offers.get(item);
+                    String shopKey = owner + "\0" + warp + "\0" + location;
+                    Map<String, BestBuyOffer> shops = byItem.computeIfAbsent(item, k -> new HashMap<>());
+                    BestBuyOffer existing = shops.get(shopKey);
                     if (existing == null || price > existing.price) {
-                        offers.put(item, new BestBuyOffer(price, owner, warp, location, stockSpace));
+                        shops.put(shopKey, new BestBuyOffer(price, owner, warp, location, stockSpace));
                     }
                 }
             }
 
+            Map<String, java.util.List<BestBuyOffer>> offers = new HashMap<>();
+            for (Map.Entry<String, Map<String, BestBuyOffer>> e : byItem.entrySet()) {
+                java.util.List<BestBuyOffer> list = new ArrayList<>(e.getValue().values());
+                list.sort((a, b) -> Double.compare(b.price, a.price));
+                offers.put(e.getKey(), list);
+            }
+
             lastLoadSummary = String.format(Locale.US,
-                    "loaded §f%d§7 unique BUYING offers from §f%d§7 rows (§f%d§7 BUYING, §f%d§7 dead skipped, §f%d§7 bad price, §f%d§7 short) — file §f%,d§7 bytes",
-                    offers.size(), totalRows, buyingRows, deadSkipped, badPrice, shortRows, fileBytes);
+                    "loaded §f%d§7 items / §f%d§7 shop-offers from §f%d§7 rows (§f%d§7 BUYING, §f%d§7 dead skipped, §f%d§7 bad price, §f%d§7 short) — file §f%,d§7 bytes",
+                    offers.size(), buyingRows, totalRows, buyingRows, deadSkipped, badPrice, shortRows, fileBytes);
 
             bestBuyOfferCache = offers;
             cachedFileModTime = modTime;
@@ -394,6 +422,18 @@ public class Container_reader implements ClientModInitializer {
             lastLoadSummary = "§cIO error reading shop_data.csv: " + e.getMessage();
             System.err.println("[ContainerReader] Failed to load shop_data.csv for valuation: " + e.getMessage());
             return bestBuyOfferCache != null ? bestBuyOfferCache : new HashMap<>();
+        }
+    }
+
+    /** Parse shop buy-space from Stock/Space; -1 if unknown. */
+    static int parseShopSpace(String stockSpace) {
+        if (stockSpace == null || stockSpace.isBlank()) return -1;
+        try {
+            String s = stockSpace.trim().replace(",", "");
+            if (s.contains("/")) s = s.split("/")[0].trim();
+            return Integer.parseInt(s);
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 

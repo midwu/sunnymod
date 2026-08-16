@@ -17,20 +17,28 @@ public class ContainerWorthHud {
 
     public static class Entry {
         public final String name;
+        /** Amount allocated to this sell leg (not always the full chest amount). */
         public final int count;
-        public final Double unitPrice; // null = no known price
-        public final double subtotal;  // 0 if unitPrice is null
+        /** Total of this item in the container (across all legs). */
+        public final int containerTotal;
+        public final Double unitPrice; // null = no known price / unsellable remainder
+        public final double subtotal;
         public final String owner;
         public final String warp;
-        public final String location;    // raw "x, y, z" from shop_data, may be empty
+        public final String location;
         public final String stockSpace;
+        /** Parsed shop buy-space for this leg; -1 if unknown. */
+        public final int shopSpace;
 
-        public Entry(String name, int count, Container_reader.BestBuyOffer offer) {
+        public Entry(String name, int allocated, int containerTotal,
+                     Container_reader.BestBuyOffer offer, int shopSpace) {
             this.name = name;
-            this.count = count;
+            this.count = allocated;
+            this.containerTotal = containerTotal;
+            this.shopSpace = shopSpace;
             if (offer != null) {
                 this.unitPrice = offer.price;
-                this.subtotal = offer.price * count;
+                this.subtotal = offer.price * allocated;
                 this.owner = offer.owner != null ? offer.owner : "";
                 this.warp = offer.warp != null ? offer.warp : "";
                 this.location = offer.location != null ? offer.location : "";
@@ -45,15 +53,14 @@ public class ContainerWorthHud {
             }
         }
 
-        public Entry(String name, int count, Double unitPrice) {
-            this.name = name;
-            this.count = count;
-            this.unitPrice = unitPrice;
-            this.subtotal = (unitPrice != null) ? unitPrice * count : 0.0;
-            this.owner = "";
-            this.warp = "";
-            this.location = "";
-            this.stockSpace = "";
+        /** Full amount has no buyer at all. */
+        public static Entry unsellable(String name, int count) {
+            return new Entry(name, count, count, null, -1);
+        }
+
+        /** Leftover after all shops with space were filled. */
+        public static Entry unsellable(String name, int leftover, int containerTotal) {
+            return new Entry(name, leftover, containerTotal, null, -1);
         }
     }
 
@@ -119,7 +126,9 @@ public class ContainerWorthHud {
         for (int i = 0; i < shown; i++) {
             Entry e = snapshot.get(i);
             // Simple row: "Tuff x3456  /warp sale"  (or "no warp" / "no price")
-            String left = e.name + " x" + e.count;
+            String left = (e.count < e.containerTotal)
+                    ? e.name + " x" + e.count + "/" + e.containerTotal
+                    : e.name + " x" + e.count;
             String right = shortWarp(e.warp);
             if (right.isEmpty()) {
                 right = (e.unitPrice != null) ? "@" + shortOwner(e.owner) : "—";

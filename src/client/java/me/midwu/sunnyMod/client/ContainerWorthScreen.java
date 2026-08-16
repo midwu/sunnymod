@@ -23,13 +23,15 @@ import java.util.Locale;
 public class ContainerWorthScreen extends Screen {
 
     private static final int ROW_HEIGHT = 22;
-    private static final int HEADER_H   = 48;
-    private static final int FOOTER_H   = 28;
-    private static final int PAD        = 12;
+    private static final int HEADER_H = 48;
+    private static final int FOOTER_H = 28;
+    private static final int PAD = 12;
     private static final int WARP_BTN_W = 110;
     private static final int STACK_SIZE = 64;
 
-    /** Ticks to wait after /warp before running findsign (chunk load). */
+    /**
+     * Ticks to wait after /warp before running findsign (chunk load).
+     */
     private static final int FIND_DELAY_TICKS = 40;
 
     private final List<ContainerWorthHud.Entry> entries;
@@ -39,9 +41,11 @@ public class ContainerWorthScreen extends Screen {
     private final boolean signFinderLoaded;
 
     private int scrollOffset = 0;
-    private int maxScroll    = 0;
+    private int maxScroll = 0;
 
-    /** Hover hit-boxes for qty tooltips: [x0,y0,x1,y1] per visible row index. */
+    /**
+     * Hover hit-boxes for qty tooltips: [x0,y0,x1,y1] per visible row index.
+     */
     private final List<int[]> qtyHitBoxes = new ArrayList<>();
     private final List<List<Text>> qtyTooltips = new ArrayList<>();
 
@@ -131,17 +135,17 @@ public class ContainerWorthScreen extends Screen {
      */
     /**
      * Build a SignFinder client command.
-     *
+     * <p>
      * SignFinder registers pattern/query with StringArgumentType.string() — NOT
      * greedyString(). That means:
-     *   - unquoted values are a single "word" and may not contain ( ) \ etc.
-     *   - multi-word values MUST be wrapped in double quotes
-     *
+     * - unquoted values are a single "word" and may not contain ( ) \ etc.
+     * - multi-word values MUST be wrapped in double quotes
+     * <p>
      * Regex mode was abandoned: patterns like (?i)\b\QTuff\E\b contain
      * characters illegal in an unquoted string(), and ClientCommandInternals
      * often surfaces the command without quotes, which triggers:
-     *   Expected whitespace to end one argument ... at ...ign regex
-     *
+     * Expected whitespace to end one argument ... at ...ign regex
+     * <p>
      * Plain text search is substring-based ("Stick" can still match
      * "Sticky Piston") but is reliable. Multi-word names are quoted.
      */
@@ -193,55 +197,57 @@ public class ContainerWorthScreen extends Screen {
         return "/warp " + w;
     }
 
-    /** Parse shop buy-space from Stock/Space column; -1 if unknown. */
+    /**
+     * Parse shop buy-space from Stock/Space column; -1 if unknown.
+     */
     static int parseShopSpace(String stockSpace) {
-        if (stockSpace == null || stockSpace.isBlank()) return -1;
-        try {
-            String s = stockSpace.trim().replace(",", "");
-            // Sometimes "15/3456" style — take the first number as remaining space
-            if (s.contains("/")) s = s.split("/")[0].trim();
-            return Integer.parseInt(s);
-        } catch (NumberFormatException e) {
-            return -1;
-        }
+        return Container_reader.parseShopSpace(stockSpace);
     }
 
-    /** "300" if shop can take all (or space unknown); "300 | 150" if limited. */
-    static String formatQty(int containerCount, int shopSpace) {
-        if (shopSpace < 0 || shopSpace >= containerCount) {
-            return String.format(Locale.US, "%,d", containerCount);
+    /**
+     * Qty column for one allocation leg:
+     * - fully covered by this leg alone: "300"
+     * - this leg takes part of the chest: "150 / 300"  (leg amount / chest total)
+     * - unsellable remainder: "50 / 300" in grey (handled by color)
+     */
+    static String formatQty(ContainerWorthHud.Entry e) {
+        if (e.count == e.containerTotal) {
+            return String.format(java.util.Locale.US, "%,d", e.count);
         }
-        return String.format(Locale.US, "%,d | %,d", containerCount, shopSpace);
+        return String.format(java.util.Locale.US, "%,d / %,d", e.count, e.containerTotal);
     }
 
-    static List<Text> qtyTooltip(int containerCount, int shopSpace, String itemName) {
+    static List<Text> qtyTooltip(ContainerWorthHud.Entry e) {
         List<Text> lines = new ArrayList<>();
-        int stacks = containerCount / STACK_SIZE;
-        int rem = containerCount % STACK_SIZE;
+        int stacks = e.count / STACK_SIZE;
+        int rem = e.count % STACK_SIZE;
         if (stacks > 0 && rem > 0) {
-            lines.add(Text.literal(String.format(Locale.US,
-                    "%,d = %d stack(s) + %d", containerCount, stacks, rem)));
+            lines.add(Text.literal(String.format(java.util.Locale.US,
+                    "This leg: %,d = %d stack(s) + %d", e.count, stacks, rem)));
         } else if (stacks > 0) {
-            lines.add(Text.literal(String.format(Locale.US,
-                    "%,d = %d stack(s)", containerCount, stacks)));
+            lines.add(Text.literal(String.format(java.util.Locale.US,
+                    "This leg: %,d = %d stack(s)", e.count, stacks)));
         } else {
-            lines.add(Text.literal(String.format(Locale.US, "%,d item(s)", containerCount)));
+            lines.add(Text.literal(String.format(java.util.Locale.US,
+                    "This leg: %,d item(s)", e.count)));
         }
 
-        if (shopSpace >= 0) {
-            if (shopSpace >= containerCount) {
-                lines.add(Text.literal("Shop can buy all (" +
-                        String.format(Locale.US, "%,d", shopSpace) + " space)"));
-            } else {
-                lines.add(Text.literal("Shop space: " +
-                        String.format(Locale.US, "%,d", shopSpace) +
-                        " — can only take part of the chest"));
-                int leftover = containerCount - shopSpace;
-                lines.add(Text.literal(String.format(Locale.US,
-                        "Leftover if sold here: %,d", leftover)));
+        if (e.containerTotal != e.count) {
+            lines.add(Text.literal(String.format(java.util.Locale.US,
+                    "Chest total for %s: %,d", e.name, e.containerTotal)));
+        }
+
+        if (e.unitPrice == null) {
+            lines.add(Text.literal("No more shops with buy-space — unsellable leftover"));
+        } else if (e.shopSpace >= 0) {
+            lines.add(Text.literal(String.format(java.util.Locale.US,
+                    "Shop space: %,d @ %s", e.shopSpace,
+                    e.owner.isEmpty() ? "?" : e.owner)));
+            if (e.count < e.containerTotal) {
+                lines.add(Text.literal("Further legs sell the rest at the next-best prices"));
             }
-        } else if (itemName != null) {
-            lines.add(Text.literal("Shop buy-space unknown"));
+        } else {
+            lines.add(Text.literal("Shop buy-space unknown — assumed can take this leg"));
         }
         return lines;
     }
@@ -270,9 +276,9 @@ public class ContainerWorthScreen extends Screen {
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
 
         int nameX = PAD;
-        int qtyX  = Math.min(210, this.width / 4);
+        int qtyX = Math.min(210, this.width / 4);
         int unitX = Math.min(300, this.width / 3 + 20);
-        int subX  = Math.min(390, this.width / 2 + 20);
+        int subX = Math.min(390, this.width / 2 + 20);
         int warpX = this.width - PAD - WARP_BTN_W;
 
         ctx.drawText(textRenderer, "Item", nameX, listTop - 12, 0xFFAAAAAA, false);
@@ -296,15 +302,15 @@ public class ContainerWorthScreen extends Screen {
             }
             ctx.drawText(textRenderer, name, nameX, rowY, color, false);
 
-            int shopSpace = parseShopSpace(e.stockSpace);
-            String qtyStr = formatQty(e.count, shopSpace);
-            // Dim the "| space" part feel: use gold if capped
-            int qtyColor = (shopSpace >= 0 && shopSpace < e.count) ? 0xFFFFAA55 : color;
+            String qtyStr = formatQty(e);
+            // Orange when this leg is only part of the chest total; grey if unsellable
+            int qtyColor = (e.unitPrice == null) ? 0xFF888888
+                    : (e.count < e.containerTotal) ? 0xFFFFAA55 : color;
             ctx.drawText(textRenderer, qtyStr, qtyX, rowY, qtyColor, false);
 
             int qtyW = textRenderer.getWidth(qtyStr);
             qtyHitBoxes.add(new int[]{qtyX, rowY - 2, qtyX + qtyW + 4, rowY + 12});
-            qtyTooltips.add(qtyTooltip(e.count, shopSpace, e.name));
+            qtyTooltips.add(qtyTooltip(e));
 
             if (e.unitPrice != null) {
                 ctx.drawText(textRenderer,
