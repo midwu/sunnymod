@@ -318,7 +318,7 @@ public class Container_reader implements ClientModInitializer {
                             (unpricedStacks > missingItems.size() ? "§7, …" : "")), false);
         }
 
-        if (pricedStacks == 0 && bestOffers.isEmpty()) {
+        if (pricedStacks == 0 && allOffers.isEmpty()) {
             client.player.sendMessage(Text.literal(
                     "§cNo BUYING offers loaded. Open a server sell menu or scan player shops first."), false);
         }
