@@ -19,23 +19,26 @@ import java.nio.file.StandardOpenOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Passively captures Auction House listings whenever the "Auction House"
- * GUI is open. Writes/updates config/sunnyMod/auction_house.csv with
- * upsert-by-key semantics so reopening /ah does not create duplicates.
+ * Passively captures Auction House listings when the "Auction House" GUI opens.
+ * Upserts config/sunnyMod/auction_house.csv. Price changes append
+ * auction_house_history.csv.
  *
- * Listing identity (no stable id in lore):
- *   seller | itemId | displayName | listingType
+ * Key includes price so two concurrent listings of the same item by the same
+ * seller (e.g. two Nightwatch Helms at $500k and $525k) stay distinct.
+ * When a BID price moves, we soft-match the previous row (same seller/item/
+ * display/type, different price) and rewrite the key + history.
  *
- * Time Left is stored but never part of the key (it ticks down).
- * Price is NOT in the key so BID updates don't create duplicate rows.
+ * Chat is quiet on open unless something is new or a bid/price moved.
  */
 public class AuctionHouseLogger implements ClientModInitializer {
 
@@ -54,15 +57,53 @@ public class AuctionHouseLogger implements ClientModInitializer {
 
   static final String AH_TITLE = "Auction House";
 
-  private static final Pattern SELLER = Pattern.compile("Seller:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
-  private static final Pattern BUY_NOW = Pattern.compile("Buy Now:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
-  private static final Pattern CURRENT = Pattern.compile("Current Price:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
-  private static final Pattern BID_INC = Pattern.compile("Bid Increment:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
-  private static final Pattern HIGHEST = Pattern.compile("Highest Bidder:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
-  private static final Pattern TIME_LEFT = Pattern.compile("Time Left:\\s*([^|]+)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern SELLER = Pattern.compile(
+          "Seller:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern BUY_NOW = Pattern.compile(
+          "Buy Now:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern CURRENT = Pattern.compile(
+          "Current Price:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern BID_INC = Pattern.compile(
+          "Bid Increment:\\s*\\$([0-9,]+(?:\\.[0-9]+)?)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern HIGHEST = Pattern.compile(
+          "Highest Bidder:\\s*(.+?)(?:\\s*\\||$)", Pattern.CASE_INSENSITIVE);
+  private static final Pattern TIME_LEFT = Pattern.compile(
+          "Time Left:\\s*([^|]+)", Pattern.CASE_INSENSITIVE);
 
   private static HandledScreen<?> pendingScreen = null;
   private static int pendingTicks = 0;
+
+  /** Result of an upsert — used for quiet chat + F7 screen. */
+  public static final class CaptureResult {
+    public final List<Listing> listings;
+    public final List<Listing> newListings;
+    public final List<PriceChange> priceChanges;
+    public final int totalOnPage;
+
+    public CaptureResult(List<Listing> listings, List<Listing> newListings,
+                         List<PriceChange> priceChanges) {
+      this.listings = listings;
+      this.newListings = newListings;
+      this.priceChanges = priceChanges;
+      this.totalOnPage = listings.size();
+    }
+
+    public boolean hasNews() {
+      return !newListings.isEmpty() || !priceChanges.isEmpty();
+    }
+  }
+
+  public static final class PriceChange {
+    public final Listing listing;
+    public final double oldPrice;
+    public final double newPrice;
+
+    public PriceChange(Listing listing, double oldPrice, double newPrice) {
+      this.listing = listing;
+      this.oldPrice = oldPrice;
+      this.newPrice = newPrice;
+    }
+  }
 
   public static final class Listing {
     public final String listingKey;
@@ -71,7 +112,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
     public final String vanillaName;
     public final int count;
     public final String seller;
-    public final String listingType; // BUY_NOW | BID
+    public final String listingType;
     public final double price;
     public final double bidIncrement;
     public final String highestBidder;
@@ -89,8 +130,13 @@ public class AuctionHouseLogger implements ClientModInitializer {
       this.listingType = listingType;
       this.price = price;
       this.bidIncrement = bidIncrement;
-      this.highestBidder = highestBidder;
-      this.timeLeft = timeLeft;
+      this.highestBidder = highestBidder != null ? highestBidder : "";
+      this.timeLeft = timeLeft != null ? timeLeft : "";
+    }
+
+    /** Prefix shared by soft-match siblings (price excluded). */
+    public String familyKey() {
+      return seller + "|" + itemId + "|" + displayName + "|" + listingType;
     }
   }
 
@@ -122,12 +168,37 @@ public class AuctionHouseLogger implements ClientModInitializer {
       HandledScreen<?> screen = pendingScreen;
       pendingScreen = null;
       try {
-        List<Listing> listings = parseListings(screen);
-        int changed = upsertListings(listings);
-        if (client.player != null) {
-          client.player.sendMessage(Text.literal(
-                  "§a[AuctionHouse] Captured §f" + listings.size() +
-                          " §alistings (§f" + changed + " §anew/updated) → §f" + AH_FILE.getFileName()), false);
+        CaptureResult result = captureAndUpsert(screen);
+        // Quiet: only chat when something is actually new or a bid moved
+        if (client.player != null && result.hasNews()) {
+          if (!result.newListings.isEmpty()) {
+            client.player.sendMessage(Text.literal(
+                    "§a[AH] §f" + result.newListings.size() + " §anew listing(s)"), false);
+            int shown = 0;
+            for (Listing L : result.newListings) {
+              if (shown++ >= 5) {
+                client.player.sendMessage(Text.literal("§7  …"), false);
+                break;
+              }
+              client.player.sendMessage(Text.literal(String.format(Locale.US,
+                      "§7  + §f%s §7@ §f$%,.0f §8(%s)",
+                      L.displayName, L.price, L.seller)), false);
+            }
+          }
+          if (!result.priceChanges.isEmpty()) {
+            client.player.sendMessage(Text.literal(
+                    "§e[AH] §f" + result.priceChanges.size() + " §eprice/bid change(s)"), false);
+            int shown = 0;
+            for (PriceChange pc : result.priceChanges) {
+              if (shown++ >= 5) {
+                client.player.sendMessage(Text.literal("§7  …"), false);
+                break;
+              }
+              client.player.sendMessage(Text.literal(String.format(Locale.US,
+                      "§7  §f%s §7$%,.0f → §f$%,.0f §8(%s)",
+                      pc.listing.displayName, pc.oldPrice, pc.newPrice, pc.listing.seller)), false);
+            }
+          }
         }
       } catch (Exception e) {
         System.err.println("[AuctionHouse] Capture failed: " + e.getMessage());
@@ -139,7 +210,13 @@ public class AuctionHouseLogger implements ClientModInitializer {
   public static boolean isAuctionHouse(String title) {
     if (title == null) return false;
     String t = title.replaceAll("§.", "").trim();
-    return t.equalsIgnoreCase(AH_TITLE) || t.toLowerCase(Locale.ROOT).contains("auction house");
+    return t.equalsIgnoreCase(AH_TITLE)
+            || t.toLowerCase(Locale.ROOT).contains("auction house");
+  }
+
+  public static CaptureResult captureAndUpsert(HandledScreen<?> screen) throws IOException {
+    List<Listing> listings = parseListings(screen);
+    return upsertListings(listings);
   }
 
   public static List<Listing> parseListings(HandledScreen<?> screen) {
@@ -206,10 +283,14 @@ public class AuctionHouseLogger implements ClientModInitializer {
     return out;
   }
 
-  /** Price is intentionally not part of the key (BID prices move). */
+  /**
+   * Key includes price so concurrent same-seller listings stay distinct.
+   * BID price moves are handled via soft-match in upsertListings.
+   */
   public static String buildKey(String seller, String itemId, String displayName,
                                 String listingType, double price) {
-    return seller + "|" + itemId + "|" + displayName + "|" + listingType;
+    return seller + "|" + itemId + "|" + displayName + "|" + listingType + "|" +
+            String.format(Locale.US, "%.2f", price);
   }
 
   private static double parseMoney(String raw) {
@@ -220,38 +301,65 @@ public class AuctionHouseLogger implements ClientModInitializer {
     }
   }
 
-  public static int upsertListings(List<Listing> listings) throws IOException {
+  public static CaptureResult upsertListings(List<Listing> listings) throws IOException {
     Files.createDirectories(CONFIG_DIR);
     Map<String, String[]> existing = loadExisting();
     String now = LocalDateTime.now().format(TS);
-    int touched = 0;
+
+    List<Listing> newListings = new ArrayList<>();
+    List<PriceChange> priceChanges = new ArrayList<>();
     List<String> historyLines = new ArrayList<>();
+    Set<String> claimedOldKeys = new HashSet<>();
 
     for (Listing L : listings) {
-      String[] prev = existing.get(L.listingKey);
-      if (prev == null) {
-        existing.put(L.listingKey, toRow(L, now, now));
-        touched++;
-      } else {
+      if (existing.containsKey(L.listingKey)) {
+        // Exact key hit — refresh last seen / time left / bidder
+        String[] prev = existing.get(L.listingKey);
         String firstSeen = prev.length > 11 ? prev[11] : now;
-        double oldPrice = 0;
-        try {
-          oldPrice = Double.parseDouble(prev[7].replace(",", ""));
-        } catch (Exception ignored) {}
-        if (Math.abs(oldPrice - L.price) > 0.001) {
-          historyLines.add(String.join(",",
-                  escape(now),
-                  escape(L.listingKey),
-                  escape(L.itemId),
-                  escape(L.displayName),
-                  escape(L.seller),
-                  L.listingType,
-                  String.format(Locale.US, "%.2f", oldPrice),
-                  String.format(Locale.US, "%.2f", L.price),
-                  escape(L.timeLeft)));
-          touched++;
-        }
         existing.put(L.listingKey, toRow(L, firstSeen, now));
+        continue;
+      }
+
+      // Soft-match: same family, different price, not yet claimed this scan
+      String family = L.familyKey();
+      String softKey = null;
+      double oldPrice = 0;
+      for (Map.Entry<String, String[]> e : existing.entrySet()) {
+        if (claimedOldKeys.contains(e.getKey())) continue;
+        if (!e.getKey().startsWith(family + "|") && !e.getKey().equals(family)) {
+          // family key form is seller|id|name|type — full key adds |price
+          if (!e.getKey().startsWith(family + "|")) continue;
+        }
+        if (!e.getKey().startsWith(family + "|")) continue;
+        try {
+          oldPrice = Double.parseDouble(e.getValue()[7].replace(",", ""));
+        } catch (Exception ignored) {
+          oldPrice = 0;
+        }
+        if (Math.abs(oldPrice - L.price) < 0.001) continue; // same price, different issue
+        softKey = e.getKey();
+        break;
+      }
+
+      if (softKey != null) {
+        claimedOldKeys.add(softKey);
+        String[] prev = existing.remove(softKey);
+        String firstSeen = prev != null && prev.length > 11 ? prev[11] : now;
+        existing.put(L.listingKey, toRow(L, firstSeen, now));
+        priceChanges.add(new PriceChange(L, oldPrice, L.price));
+        historyLines.add(String.join(",",
+                escape(now),
+                escape(L.listingKey),
+                escape(L.itemId),
+                escape(L.displayName),
+                escape(L.seller),
+                L.listingType,
+                String.format(Locale.US, "%.2f", oldPrice),
+                String.format(Locale.US, "%.2f", L.price),
+                escape(L.timeLeft)));
+      } else {
+        existing.put(L.listingKey, toRow(L, now, now));
+        newListings.add(L);
       }
     }
 
@@ -279,7 +387,8 @@ public class AuctionHouseLogger implements ClientModInitializer {
         w.newLine();
       }
     }
-    return touched;
+
+    return new CaptureResult(listings, newListings, priceChanges);
   }
 
   private static String[] toRow(Listing L, String firstSeen, String lastSeen) {

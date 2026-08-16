@@ -78,7 +78,7 @@ public class Container_reader implements ClientModInitializer {
     private static Map<String, java.util.List<BestBuyOffer>> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
 
-    // Last load diagnostics (filled by getBestBuyOffers, shown on F7).
+    // Last load diagnostics (filled by getAllBuyOffers, shown on F7).
     private static String lastLoadSummary = "not loaded yet";
     private static boolean lastLoadFromCache = false;
 
@@ -140,6 +140,7 @@ public class Container_reader implements ClientModInitializer {
                 } else if (client.currentScreen instanceof ContainerWorthScreen) {
                     // Already open — ignore
                 } else if (client.player != null) {
+                    // Outside a container: reopen last results if any
                     if (ContainerWorthHud.hasResults()) {
                         client.setScreen(new ContainerWorthScreen(
                                 ContainerWorthHud.getEntries(),
@@ -219,21 +220,29 @@ public class Container_reader implements ClientModInitializer {
                     "§7[ContainerReader] Full path: §f" + DUMP_FILE.toAbsolutePath()), false);
         }
     }
+
+    // ── F7 on Auction House: compare listings to shop_data ───────────────────
+
+    /**
+     * Parse open AH listings, upsert to auction_house.csv, then compare each
+     * listing's vanilla item name against shop_data BUYING (sell-to-shop) and
+     * SELLING (buy-from-shop) offers. Custom/OP display names rarely hit
+     * shop_data — those show as "no shop match".
+     */
     private void evaluateAuctionHouse(HandledScreen<?> screen) {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        List<AuctionHouseLogger.Listing> listings = AuctionHouseLogger.parseListings(screen);
+        AuctionHouseLogger.CaptureResult result;
         try {
-            int touched = AuctionHouseLogger.upsertListings(listings);
-            client.player.sendMessage(Text.literal(
-                    "§a[AuctionHouse] §f" + listings.size() + " §alistings (file §f" +
-                            touched + " §arows touched)"), false);
+            result = AuctionHouseLogger.captureAndUpsert(screen);
         } catch (Exception e) {
             client.player.sendMessage(Text.literal(
                     "§c[AuctionHouse] Failed to save: " + e.getMessage()), false);
+            return;
         }
 
+        List<AuctionHouseLogger.Listing> listings = result.listings;
         if (listings.isEmpty()) {
             client.player.sendMessage(Text.literal(
                     "§e[AuctionHouse] No listings parsed — empty page or UI-only slots?"), false);
@@ -243,8 +252,7 @@ public class Container_reader implements ClientModInitializer {
         Map<String, BestBuyOffer> buyOffers = loadBestOffersByAction("BUYING");
         Map<String, BestBuyOffer> sellOffers = loadBestOffersByAction("SELLING");
 
-        int matched = 0;
-        List<String> lines = new ArrayList<>();
+        List<AuctionProfitScreen.Opp> opps = new ArrayList<>();
         for (AuctionHouseLogger.Listing L : listings) {
             BestBuyOffer shopBuys = buyOffers.get(L.vanillaName);
             if (shopBuys == null) shopBuys = buyOffers.get(L.displayName);
@@ -253,35 +261,39 @@ public class Container_reader implements ClientModInitializer {
 
             if (shopBuys != null && shopBuys.price > L.price) {
                 double profit = (shopBuys.price - L.price) * L.count;
-                matched++;
-                lines.add(String.format(java.util.Locale.US,
-                        "§aAH→Shop §f%s §7x%d §fx §f$%,.0f §7→ shop pays §f$%,.2f §a(+ $%,.2f) §7@%s %s",
-                        L.displayName, L.count, L.price, shopBuys.price, profit,
-                        shopBuys.owner.isEmpty() ? "?" : shopBuys.owner,
-                        shopBuys.warp.isEmpty() ? "" : "/" + shopBuys.warp.replaceFirst("^/+", "")));
+                opps.add(new AuctionProfitScreen.Opp(
+                        "AH→Shop", L.displayName, L.vanillaName, L.seller, L.listingType,
+                        L.price, shopBuys.price, profit,
+                        shopBuys.owner, shopBuys.warp, L.count));
             }
             if (shopSells != null && L.price < shopSells.price) {
                 double save = (shopSells.price - L.price) * L.count;
-                matched++;
-                lines.add(String.format(java.util.Locale.US,
-                        "§bAH cheaper than shop §f%s §7x%d §fAH $%,.0f §7< shop sells §f$%,.2f §b(save $%,.2f)",
-                        L.displayName, L.count, L.price, shopSells.price, save));
+                opps.add(new AuctionProfitScreen.Opp(
+                        "AH cheaper", L.displayName, L.vanillaName, L.seller, L.listingType,
+                        L.price, shopSells.price, save,
+                        shopSells.owner, shopSells.warp, L.count));
             }
         }
 
-        if (lines.isEmpty()) {
-            client.player.sendMessage(Text.literal(
-                    "§7[AuctionHouse] No shop_data matches with edge on this page " +
-                            "(common for custom/OP items). " + listings.size() + " listings scanned."), false);
-        } else {
-            client.player.sendMessage(Text.literal(
-                    "§a[AuctionHouse] §f" + matched + " §aopportunity line(s):"), false);
-            for (String line : lines) {
-                client.player.sendMessage(Text.literal(line), false);
-            }
+        // Brief chat summary only; details live on the screen
+        client.player.sendMessage(Text.literal(String.format(
+                "§a[AH] §f%d §alistings · §f%d §aopportunities · §f%d §anew · §f%d §abid changes",
+                listings.size(), opps.size(),
+                result.newListings.size(), result.priceChanges.size())), false);
+
+        // Leave AH open on server? Closing avoids locked-state issues similar to chests.
+        if (client.player != null) {
+            client.player.closeHandledScreen();
         }
+        client.setScreen(new AuctionProfitScreen(
+                opps, listings.size(),
+                result.newListings.size(), result.priceChanges.size()));
     }
 
+    /**
+     * Best price per item name for a given Action column (BUYING or SELLING).
+     * Lightweight one-shot parse — not the multi-offer cascade used by chest F7.
+     */
     private static Map<String, BestBuyOffer> loadBestOffersByAction(String actionWanted) {
         Map<String, BestBuyOffer> best = new HashMap<>();
         if (!Files.exists(SHOP_DATA_FILE)) return best;
@@ -313,6 +325,7 @@ public class Container_reader implements ClientModInitializer {
         }
         return best;
     }
+
 
     // ── F7: worth evaluator (single-sided best-sell) ─────────────────────────
 
