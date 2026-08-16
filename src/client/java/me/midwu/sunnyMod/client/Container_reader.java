@@ -76,6 +76,10 @@ public class Container_reader implements ClientModInitializer {
     private static Map<String, BestBuyOffer> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
 
+    // Last load diagnostics (filled by getBestBuyOffers, shown on F7).
+    private static String lastLoadSummary = "not loaded yet";
+    private static boolean lastLoadFromCache = false;
+
     /**
      * Best known BUYING offer for an item: highest price any shop will pay,
      * plus the owner/warp/location that offered it so the HUD can show
@@ -190,7 +194,10 @@ public class Container_reader implements ClientModInitializer {
 
         if (client.player != null) {
             client.player.sendMessage(Text.literal(
-                    "§a[ContainerReader] Dumped §f" + written + " §aslot(s) from §f\"" + screen.getTitle().getString() + "\"§a → container_dump.csv"), false);
+                    "§a[ContainerReader] Dumped §f" + written + " §aslot(s) from §f\"" +
+                            screen.getTitle().getString() + "\"§a → §f" + DUMP_FILE.getFileName()), false);
+            client.player.sendMessage(Text.literal(
+                    "§7[ContainerReader] Full path: §f" + DUMP_FILE.toAbsolutePath()), false);
         }
     }
 
@@ -200,12 +207,21 @@ public class Container_reader implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
+        // Force a fresh load summary every F7 so diagnostics stay accurate.
         Map<String, BestBuyOffer> bestOffers = getBestBuyOffers();
+
+        // ── Diagnostic block (always shown while we're debugging) ───────────
+        client.player.sendMessage(Text.literal(
+                "§7[ContainerReader] shop_data path: §f" + SHOP_DATA_FILE.toAbsolutePath()), false);
+        client.player.sendMessage(Text.literal(
+                "§7[ContainerReader] " + lastLoadSummary +
+                        (lastLoadFromCache ? " §8(cache hit)" : " §8(re-parsed)")), false);
 
         double total = 0.0;
         int pricedStacks = 0;   // still counted per physical stack (useful diagnostic)
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
+        List<String> matchedSamples = new ArrayList<>(); // first few hits for feedback
 
         // Aggregate by item name so a 54-slot chest of the same block becomes
         // one HUD row instead of 54. Price/offer is looked up once per name.
@@ -229,9 +245,13 @@ public class Container_reader implements ClientModInitializer {
                 offerByName.putIfAbsent(name, offer);
                 total += offer.price * count;
                 pricedStacks++;
+                if (matchedSamples.size() < 3 && !matchedSamples.contains(name)) {
+                    matchedSamples.add(name + " → $" + String.format(Locale.US, "%,.2f", offer.price)
+                            + " @" + (offer.owner.isEmpty() ? "?" : offer.owner));
+                }
             } else {
                 unpricedStacks++;
-                if (!missingItems.contains(name) && missingItems.size() < 5) {
+                if (!missingItems.contains(name) && missingItems.size() < 8) {
                     missingItems.add(name);
                 }
             }
@@ -242,6 +262,15 @@ public class Container_reader implements ClientModInitializer {
                     "§e[ContainerReader] Container is empty — nothing to value."), false);
             return;
         }
+
+        // Show the exact lookup keys the container produced (helps spot
+        // translation / display-name mismatches against the CSV).
+        List<String> containerKeys = new ArrayList<>(countByName.keySet());
+        int keyPreview = Math.min(containerKeys.size(), 6);
+        client.player.sendMessage(Text.literal(
+                "§7[ContainerReader] Container keys (" + containerKeys.size() + " distinct): §f" +
+                        String.join("§7, §f", containerKeys.subList(0, keyPreview)) +
+                        (containerKeys.size() > keyPreview ? "§7, …" : "")), false);
 
         List<ContainerWorthHud.Entry> entries = new ArrayList<>();
         for (Map.Entry<String, Integer> e : countByName.entrySet()) {
@@ -257,13 +286,37 @@ public class Container_reader implements ClientModInitializer {
         ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries);
 
         String msg = "§a[ContainerReader] Estimated worth: §f$" + String.format(Locale.US, "%,.2f", total) +
-                " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s)) — see HUD for breakdown";
+                " §7(" + pricedStacks + " priced, " + unpricedStacks + " unpriced stack(s))" +
+                " §8[" + countByName.size() + " distinct items] — see HUD";
         client.player.sendMessage(Text.literal(msg), false);
 
-        if (!missingItems.isEmpty()) {
-            String extra = unpricedStacks > missingItems.size() ? ", ..." : "";
+        if (!matchedSamples.isEmpty()) {
             client.player.sendMessage(Text.literal(
-                    "§7No known buy price for: " + String.join(", ", missingItems) + extra), false);
+                    "§a[ContainerReader] Matched: §f" + String.join("§7 | §f", matchedSamples)), false);
+        }
+
+        if (!missingItems.isEmpty()) {
+            String extra = missingItems.size() >= 8 ? "§7, …" : "";
+            client.player.sendMessage(Text.literal(
+                    "§e[ContainerReader] No BUYING price for: §f" + String.join("§7, §f", missingItems) + extra), false);
+        }
+
+        if (pricedStacks == 0 && bestOffers.isEmpty()) {
+            client.player.sendMessage(Text.literal(
+                    "§c[ContainerReader] No BUYING offers loaded at all. Open a server sell menu " +
+                            "(\"Sell Your Blocks!\" etc.) or scan player shops so shop_data.csv gets rows."), false);
+        } else if (pricedStacks == 0 && !bestOffers.isEmpty()) {
+            // Offers exist but nothing in this container matched — show a few CSV keys.
+            List<String> csvSample = new ArrayList<>();
+            int n = 0;
+            for (String k : bestOffers.keySet()) {
+                csvSample.add(k);
+                if (++n >= 5) break;
+            }
+            client.player.sendMessage(Text.literal(
+                    "§e[ContainerReader] CSV has §f" + bestOffers.size() +
+                            " §eBUYING keys but none matched this container. Sample CSV keys: §f" +
+                            String.join("§7, §f", csvSample)), false);
         }
     }
 
@@ -279,54 +332,85 @@ public class Container_reader implements ClientModInitializer {
      */
     private static Map<String, BestBuyOffer> getBestBuyOffers() {
         try {
-            long modTime = Files.exists(SHOP_DATA_FILE)
-                    ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1;
+            boolean exists = Files.exists(SHOP_DATA_FILE);
+            long modTime = exists ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1;
 
             if (bestBuyOfferCache != null && modTime == cachedFileModTime) {
+                lastLoadFromCache = true;
+                // lastLoadSummary already set from the previous parse
                 return bestBuyOfferCache;
             }
 
+            lastLoadFromCache = false;
             Map<String, BestBuyOffer> offers = new HashMap<>();
-            if (Files.exists(SHOP_DATA_FILE)) {
-                try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA_FILE)) {
-                    String line;
-                    boolean isHeader = true;
-                    while ((line = reader.readLine()) != null) {
-                        if (isHeader) { isHeader = false; continue; }
-                        String[] parts = parseCsvLine(line);
-                        // Shop Location, Shop Owner, Item, Stock/Space, Price, Action, Status, Timestamp, Warp
-                        if (parts.length < 7) continue;
+            int totalRows = 0;
+            int buyingRows = 0;
+            int deadSkipped = 0;
+            int badPrice = 0;
+            int shortRows = 0;
 
-                        String location   = parts[0];
-                        String owner      = parts[1];
-                        String item       = parts[2];
-                        String stockSpace = parts[3];
-                        String action     = parts[5];
-                        String status     = parts[6];
-                        String warp       = parts.length > 8 ? parts[8] : "";
+            if (!exists) {
+                lastLoadSummary = "shop_data.csv §cMISSING§7 — expected at config/sunnyMod/";
+                bestBuyOfferCache = offers;
+                cachedFileModTime = modTime;
+                return offers;
+            }
 
-                        if (!"BUYING".equalsIgnoreCase(action)) continue;
-                        if ("Dead".equalsIgnoreCase(status)) continue;
+            long fileBytes = Files.size(SHOP_DATA_FILE);
 
-                        double price;
-                        try {
-                            price = Double.parseDouble(parts[4]);
-                        } catch (NumberFormatException e) {
-                            continue;
-                        }
+            try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA_FILE)) {
+                String line;
+                boolean isHeader = true;
+                while ((line = reader.readLine()) != null) {
+                    if (isHeader) { isHeader = false; continue; }
+                    totalRows++;
+                    String[] parts = parseCsvLine(line);
+                    // Shop Location, Shop Owner, Item, Stock/Space, Price, Action, Status, Timestamp, Warp
+                    if (parts.length < 7) {
+                        shortRows++;
+                        continue;
+                    }
 
-                        BestBuyOffer existing = offers.get(item);
-                        if (existing == null || price > existing.price) {
-                            offers.put(item, new BestBuyOffer(price, owner, warp, location, stockSpace));
-                        }
+                    String location   = parts[0];
+                    String owner      = parts[1];
+                    String item       = parts[2];
+                    String stockSpace = parts[3];
+                    String action     = parts[5];
+                    String status     = parts[6];
+                    String warp       = parts.length > 8 ? parts[8] : "";
+
+                    if (!"BUYING".equalsIgnoreCase(action)) continue;
+                    if ("Dead".equalsIgnoreCase(status)) {
+                        deadSkipped++;
+                        continue;
+                    }
+
+                    double price;
+                    try {
+                        price = Double.parseDouble(parts[4]);
+                    } catch (NumberFormatException e) {
+                        badPrice++;
+                        continue;
+                    }
+
+                    buyingRows++;
+                    BestBuyOffer existing = offers.get(item);
+                    if (existing == null || price > existing.price) {
+                        offers.put(item, new BestBuyOffer(price, owner, warp, location, stockSpace));
                     }
                 }
             }
+
+            lastLoadSummary = String.format(Locale.US,
+                    "loaded §f%d§7 unique BUYING offers from §f%d§7 rows (§f%d§7 BUYING, §f%d§7 dead skipped, §f%d§7 bad price, §f%d§7 short) — file §f%,d§7 bytes",
+                    offers.size(), totalRows, buyingRows, deadSkipped, badPrice, shortRows, fileBytes);
 
             bestBuyOfferCache = offers;
             cachedFileModTime = modTime;
             return offers;
         } catch (IOException e) {
+            lastLoadFromCache = false;
+            lastLoadSummary = "§cIO error reading shop_data.csv: " + e.getMessage();
             System.err.println("[ContainerReader] Failed to load shop_data.csv for valuation: " + e.getMessage());
             return bestBuyOfferCache != null ? bestBuyOfferCache : new HashMap<>();
         }
