@@ -104,6 +104,75 @@ public class Container_reader implements ClientModInitializer {
         }
     }
 
+
+    /** Strip § colour/format codes from a name for stable matching. */
+    static String stripFormatting(String s) {
+        if (s == null) return "";
+        return s.replaceAll("§.", "").trim();
+    }
+
+    /**
+     * Lookup BUYING offers for a stack.
+     * <ul>
+     *   <li>Custom-named items (display ≠ vanilla): match <b>display name only</b>
+     *       so OP gear does not pick up server commodity prices.</li>
+     *   <li>Plain items (display == vanilla): match that name — covers player
+     *       shops and server {@code __server__} rows keyed by Item.getName().</li>
+     * </ul>
+     * Server shop data is always stored under the vanilla name; we only hit it
+     * when the stack itself is plain (or the player shop used the vanilla name).
+     */
+    static java.util.List<BestBuyOffer> lookupOffers(
+            Map<String, java.util.List<BestBuyOffer>> all,
+            String displayName,
+            String vanillaName) {
+        String display = stripFormatting(displayName);
+        String vanilla = stripFormatting(vanillaName);
+        if (display.isEmpty() && vanilla.isEmpty()) return java.util.List.of();
+
+        boolean plain = display.isEmpty() || display.equalsIgnoreCase(vanilla);
+        if (!plain) {
+            java.util.List<BestBuyOffer> byDisplay = all.get(display);
+            if (byDisplay != null && !byDisplay.isEmpty()) return byDisplay;
+            for (var e : all.entrySet()) {
+                if (e.getKey().equalsIgnoreCase(display)) return e.getValue();
+            }
+            return java.util.List.of();
+        }
+        String key = !vanilla.isEmpty() ? vanilla : display;
+        java.util.List<BestBuyOffer> list = all.get(key);
+        if (list != null && !list.isEmpty()) return list;
+        for (var e : all.entrySet()) {
+            if (e.getKey().equalsIgnoreCase(key)) return e.getValue();
+        }
+        return java.util.List.of();
+    }
+
+    /** Single best offer (for AH compare). Same display-vs-vanilla rules. */
+    static BestBuyOffer lookupBestOffer(
+            Map<String, BestBuyOffer> bestByName,
+            String displayName,
+            String vanillaName) {
+        String display = stripFormatting(displayName);
+        String vanilla = stripFormatting(vanillaName);
+        boolean plain = display.isEmpty() || display.equalsIgnoreCase(vanilla);
+        if (!plain) {
+            BestBuyOffer o = bestByName.get(display);
+            if (o != null) return o;
+            for (var e : bestByName.entrySet()) {
+                if (e.getKey().equalsIgnoreCase(display)) return e.getValue();
+            }
+            return null;
+        }
+        String key = !vanilla.isEmpty() ? vanilla : display;
+        BestBuyOffer o = bestByName.get(key);
+        if (o != null) return o;
+        for (var e : bestByName.entrySet()) {
+            if (e.getKey().equalsIgnoreCase(key)) return e.getValue();
+        }
+        return null;
+    }
+
     @Override
     public void onInitializeClient() {
         try {
@@ -254,10 +323,8 @@ public class Container_reader implements ClientModInitializer {
 
         List<AuctionProfitScreen.Opp> opps = new ArrayList<>();
         for (AuctionHouseLogger.Listing L : listings) {
-            BestBuyOffer shopBuys = buyOffers.get(L.vanillaName);
-            if (shopBuys == null) shopBuys = buyOffers.get(L.displayName);
-            BestBuyOffer shopSells = sellOffers.get(L.vanillaName);
-            if (shopSells == null) shopSells = sellOffers.get(L.displayName);
+            BestBuyOffer shopBuys = lookupBestOffer(buyOffers, L.displayName, L.vanillaName);
+            BestBuyOffer shopSells = lookupBestOffer(sellOffers, L.displayName, L.vanillaName);
 
             if (shopBuys != null && shopBuys.price > L.price) {
                 double profit = (shopBuys.price - L.price) * L.count;
@@ -310,7 +377,8 @@ public class Container_reader implements ClientModInitializer {
                 double price;
                 try { price = Double.parseDouble(p[4]); }
                 catch (NumberFormatException e) { continue; }
-                String item = p[2];
+                String item = stripFormatting(p[2]);
+                if (item.isEmpty()) continue;
                 String owner = p[1];
                 String location = p[0];
                 String stock = p[3];
@@ -342,8 +410,9 @@ public class Container_reader implements ClientModInitializer {
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
 
-        // Aggregate by item name (container slots only — skip player inventory).
+        // Aggregate by display name (custom OP items stay distinct from vanilla).
         Map<String, Integer> countByName = new LinkedHashMap<>();
+        Map<String, String> vanillaByDisplay = new HashMap<>();
 
         for (Slot slot : screen.getScreenHandler().slots) {
             // HandledScreen includes the player's 36 inv slots at the bottom.
@@ -353,10 +422,12 @@ public class Container_reader implements ClientModInitializer {
             ItemStack stack = slot.getStack();
             if (stack.isEmpty()) continue;
 
-            // Vanilla name — matches ServerShopLogger / commodity shops.
-            String name = stack.getItem().getName().getString();
+            String display = stripFormatting(stack.getName().getString());
+            String vanilla = stripFormatting(stack.getItem().getName().getString());
+            if (display.isEmpty()) display = vanilla;
             int count = stack.getCount();
-            countByName.merge(name, count, Integer::sum);
+            countByName.merge(display, count, Integer::sum);
+            vanillaByDisplay.putIfAbsent(display, vanilla);
         }
 
         if (countByName.isEmpty()) {
@@ -371,7 +442,8 @@ public class Container_reader implements ClientModInitializer {
         for (Map.Entry<String, Integer> e : countByName.entrySet()) {
             String name = e.getKey();
             int containerCount = e.getValue();
-            java.util.List<BestBuyOffer> offers = allOffers.getOrDefault(name, java.util.List.of());
+            String vanilla = vanillaByDisplay.getOrDefault(name, name);
+            java.util.List<BestBuyOffer> offers = lookupOffers(allOffers, name, vanilla);
 
             if (offers.isEmpty()) {
                 unpricedStacks++; // counted once per distinct item for summary
@@ -507,8 +579,10 @@ public class Container_reader implements ClientModInitializer {
                     }
 
                     buyingRows++;
+                    String itemKey = stripFormatting(item);
+                    if (itemKey.isEmpty()) continue;
                     String shopKey = owner + "\0" + warp + "\0" + location;
-                    Map<String, BestBuyOffer> shops = byItem.computeIfAbsent(item, k -> new HashMap<>());
+                    Map<String, BestBuyOffer> shops = byItem.computeIfAbsent(itemKey, k -> new HashMap<>());
                     BestBuyOffer existing = shops.get(shopKey);
                     if (existing == null || price > existing.price) {
                         shops.put(shopKey, new BestBuyOffer(price, owner, warp, location, stockSpace));
