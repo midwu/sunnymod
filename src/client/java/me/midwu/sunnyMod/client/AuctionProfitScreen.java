@@ -10,6 +10,10 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 
+/**
+ * F7 Auction House breakdown — opportunities vs shop_data, plus page summary.
+ * Same layout language as ContainerWorthScreen (header / scroll rows / close).
+ */
 public class AuctionProfitScreen extends Screen {
 
   private static final int ROW_HEIGHT = 20;
@@ -18,14 +22,14 @@ public class AuctionProfitScreen extends Screen {
   private static final int PAD        = 12;
 
   public static final class Opp {
-    public final String kind;
+    public final String kind;       // "AH→Shop" | "AH cheaper"
     public final String displayName;
     public final String vanillaName;
     public final String seller;
     public final String listingType;
     public final double ahPrice;
     public final double shopPrice;
-    public final double edge;
+    public final double edge;       // profit or savings
     public final String shopOwner;
     public final String shopWarp;
     public final int count;
@@ -71,6 +75,7 @@ public class AuctionProfitScreen extends Screen {
     int listBottom = this.height - FOOTER_H;
     int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
     maxScroll = Math.max(0, opps.size() - visibleRows);
+
     addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
             .dimensions(this.width - PAD - 80, this.height - FOOTER_H + 4, 80, 20)
             .build());
@@ -78,11 +83,16 @@ public class AuctionProfitScreen extends Screen {
 
   @Override
   public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
+    // Dim background
     ctx.fill(0, 0, this.width, this.height, 0xCC000000);
-    ctx.drawText(textRenderer, "Auction House vs shop_data", PAD, 10, 0xFFFFFFFF, false);
-    ctx.drawText(textRenderer, String.format(Locale.US,
-            "%d listings · %d new · %d bid/price changes · %d opportunities",
-            listingCount, newCount, bidChangeCount, opps.size()), PAD, 24, 0xFFAAAAAA, false);
+
+    String title = "Auction House vs shop_data";
+    ctx.drawText(textRenderer, title, PAD, 10, 0xFFFFFFFF, false);
+
+    String sub = String.format(Locale.US,
+            "%d listings on page · %d new · %d bid/price changes · %d opportunities",
+            listingCount, newCount, bidChangeCount, opps.size());
+    ctx.drawText(textRenderer, sub, PAD, 24, 0xFFAAAAAA, false);
 
     if (opps.isEmpty()) {
       ctx.drawText(textRenderer,
@@ -93,6 +103,8 @@ public class AuctionProfitScreen extends Screen {
     int listTop = HEADER_H;
     int listBottom = this.height - FOOTER_H;
     int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+
+    // Column headers
     int y = listTop - 12;
     ctx.drawText(textRenderer, "Item", PAD, y, 0xFF888888, false);
     ctx.drawText(textRenderer, "AH", this.width / 2 - 40, y, 0xFF888888, false);
@@ -104,52 +116,68 @@ public class AuctionProfitScreen extends Screen {
       if (idx >= opps.size()) break;
       Opp o = opps.get(idx);
       int rowY = listTop + i * ROW_HEIGHT;
+
       boolean hover = mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
               && mouseX >= PAD && mouseX < this.width - PAD;
-      if (hover) ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+      if (hover) {
+        ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+      }
 
       int nameColor = o.kind.startsWith("AH→") ? 0xFF55FF55 : 0xFF55FFFF;
       String name = o.displayName;
       if (textRenderer.getWidth(name) > this.width / 2 - 50) {
-        while (textRenderer.getWidth(name + "…") > this.width / 2 - 50 && name.length() > 3)
+        while (textRenderer.getWidth(name + "…") > this.width / 2 - 50 && name.length() > 3) {
           name = name.substring(0, name.length() - 1);
+        }
         name = name + "…";
       }
       ctx.drawText(textRenderer, name, PAD, rowY + 4, nameColor, false);
-      ctx.drawText(textRenderer, String.format(Locale.US, "$%,.0f", o.ahPrice),
-              this.width / 2 - 40, rowY + 4, 0xFFFFFFFF, false);
-      ctx.drawText(textRenderer, String.format(Locale.US, "$%,.0f", o.shopPrice),
-              this.width / 2 + 40, rowY + 4, 0xFFFFFFFF, false);
-      ctx.drawText(textRenderer, String.format(Locale.US, "+$%,.0f", o.edge),
-              this.width - PAD - 90, rowY + 4, 0xFF55FF55, false);
+
+      String ah = String.format(Locale.US, "$%,.0f", o.ahPrice);
+      String shop = String.format(Locale.US, "$%,.0f", o.shopPrice);
+      String edge = String.format(Locale.US, "+$%,.0f", o.edge);
+      ctx.drawText(textRenderer, ah, this.width / 2 - 40, rowY + 4, 0xFFFFFFFF, false);
+      ctx.drawText(textRenderer, shop, this.width / 2 + 40, rowY + 4, 0xFFFFFFFF, false);
+      ctx.drawText(textRenderer, edge, this.width - PAD - 90, rowY + 4, 0xFF55FF55, false);
 
       if (hover) {
         List<Text> tip = new ArrayList<>();
         tip.add(Text.literal(o.kind + " · " + o.listingType));
         tip.add(Text.literal("Seller: " + o.seller));
         tip.add(Text.literal(String.format(Locale.US, "AH $%,.2f  vs shop $%,.2f", o.ahPrice, o.shopPrice)));
-        if (!o.shopOwner.isEmpty())
+        if (!o.shopOwner.isEmpty()) {
           tip.add(Text.literal("Shop: " + o.shopOwner
                   + (o.shopWarp.isEmpty() ? "" : "  /" + o.shopWarp.replaceFirst("^/+", ""))));
+        }
         tip.add(Text.literal("Vanilla: " + o.vanillaName));
         ctx.drawTooltip(textRenderer, tip, mouseX, mouseY);
       }
     }
+
     if (maxScroll > 0) {
-      ctx.drawText(textRenderer, String.format("scroll %d/%d", scrollOffset + 1,
-                      Math.min(scrollOffset + visibleRows, opps.size())),
-              PAD, this.height - FOOTER_H + 8, 0xFF666666, false);
+      String scrollHint = String.format("scroll %d/%d", scrollOffset + 1,
+              Math.min(scrollOffset + visibleRows, opps.size()));
+      ctx.drawText(textRenderer, scrollHint, PAD, this.height - FOOTER_H + 8, 0xFF666666, false);
     }
+
     super.render(ctx, mouseX, mouseY, delta);
   }
 
   @Override
   public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-    if (vertical > 0 && scrollOffset > 0) { scrollOffset--; return true; }
-    if (vertical < 0 && scrollOffset < maxScroll) { scrollOffset++; return true; }
+    if (vertical > 0 && scrollOffset > 0) {
+      scrollOffset--;
+      return true;
+    }
+    if (vertical < 0 && scrollOffset < maxScroll) {
+      scrollOffset++;
+      return true;
+    }
     return super.mouseScrolled(mouseX, mouseY, horizontal, vertical);
   }
 
   @Override
-  public boolean shouldPause() { return false; }
+  public boolean shouldPause() {
+    return false;
+  }
 }

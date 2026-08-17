@@ -106,7 +106,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
   }
 
   public static final class Listing {
-    public final String listingKey;
+    public String listingKey; // stable after first insert; may be reassigned on soft-match keep
     public final String itemId;
     public final String displayName;
     public final String vanillaName;
@@ -287,11 +287,22 @@ public class AuctionHouseLogger implements ClientModInitializer {
    * Key includes price so concurrent same-seller listings stay distinct.
    * BID price moves are handled via soft-match in upsertListings.
    */
+  /**
+   * Provisional key used only until upsert assigns a stable exp-based key.
+   * Matching is by family + expected TimeLeft, not by this string.
+   */
   public static String buildKey(String seller, String itemId, String displayName,
                                 String listingType, double price) {
     return seller + "|" + itemId + "|" + displayName + "|" + listingType + "|" +
             String.format(Locale.US, "%.2f", price);
   }
+
+  /** Stable identity: family + absolute expiry epoch (now + timeLeft at first sight). */
+  static String stableKey(String family, long nowEpoch, long timeLeftSec) {
+    long exp = (timeLeftSec >= 0 && nowEpoch > 0) ? (nowEpoch + timeLeftSec) : nowEpoch;
+    return family + "|exp" + exp;
+  }
+
 
   private static double parseMoney(String raw) {
     try {
@@ -301,66 +312,153 @@ public class AuctionHouseLogger implements ClientModInitializer {
     }
   }
 
+  /** Parse "0d 18h 39m 42s" / "1d 23h 18m 49s" → total seconds. */
+  static long parseTimeLeftSeconds(String timeLeft) {
+    if (timeLeft == null || timeLeft.isBlank()) return -1;
+    long total = 0;
+    // Java string: \\d and \\s so the regex engine sees \d and \s
+    java.util.regex.Matcher m = Pattern.compile(
+            "(?:(\\d+)\\s*d)?\\s*(?:(\\d+)\\s*h)?\\s*(?:(\\d+)\\s*m)?\\s*(?:(\\d+)\\s*s)?",
+            Pattern.CASE_INSENSITIVE).matcher(timeLeft.trim());
+    if (!m.find()) return -1;
+    if (m.group(1) != null) total += Long.parseLong(m.group(1)) * 86400L;
+    if (m.group(2) != null) total += Long.parseLong(m.group(2)) * 3600L;
+    if (m.group(3) != null) total += Long.parseLong(m.group(3)) * 60L;
+    if (m.group(4) != null) total += Long.parseLong(m.group(4));
+    return total;
+  }
+
+  static long parseTimestampSeconds(String ts) {
+    if (ts == null || ts.isBlank()) return -1;
+    try {
+      return java.time.LocalDateTime.parse(ts, TS)
+              .atZone(java.time.ZoneId.systemDefault())
+              .toEpochSecond();
+    } catch (Exception e) {
+      return -1;
+    }
+  }
+
+  /**
+   * Match page listings to stored rows by family + expected remaining time
+   * (stored TimeLeft minus wall-clock since LastSeen). Concurrent listings
+   * that only differ by ~10–30s of timer stay separate; a true BID price
+   * move keeps the same row via time continuity.
+   *
+   * Keys are stable: family|exp{firstSeenExpiryEpoch}. Price is a column only.
+   * Max allowed drift between expected and observed remaining: 45s.
+   */
+  private static final long TIME_MATCH_TOLERANCE_SEC = 45;
+
   public static CaptureResult upsertListings(List<Listing> listings) throws IOException {
     Files.createDirectories(CONFIG_DIR);
     Map<String, String[]> existing = loadExisting();
     String now = LocalDateTime.now().format(TS);
+    long nowEpoch = parseTimestampSeconds(now);
 
     List<Listing> newListings = new ArrayList<>();
     List<PriceChange> priceChanges = new ArrayList<>();
     List<String> historyLines = new ArrayList<>();
     Set<String> claimedOldKeys = new HashSet<>();
+    Set<Integer> claimedPageIdx = new HashSet<>();
 
-    for (Listing L : listings) {
-      if (existing.containsKey(L.listingKey)) {
-        // Exact key hit — refresh last seen / time left / bidder
-        String[] prev = existing.get(L.listingKey);
-        String firstSeen = prev.length > 11 ? prev[11] : now;
-        existing.put(L.listingKey, toRow(L, firstSeen, now));
-        continue;
-      }
+    long[] pageTl = new long[listings.size()];
+    for (int i = 0; i < listings.size(); i++) {
+      pageTl[i] = parseTimeLeftSeconds(listings.get(i).timeLeft);
+    }
 
-      // Soft-match: same family, different price, not yet claimed this scan
+    // Match each page listing to at most one stored row (greedy, best time drift)
+    for (int i = 0; i < listings.size(); i++) {
+      Listing L = listings.get(i);
       String family = L.familyKey();
-      String softKey = null;
-      double oldPrice = 0;
+      long pageRemaining = pageTl[i];
+
+      String bestKey = null;
+      long bestDrift = Long.MAX_VALUE;
+      double bestOldPrice = 0;
+      String[] bestRow = null;
+
       for (Map.Entry<String, String[]> e : existing.entrySet()) {
         if (claimedOldKeys.contains(e.getKey())) continue;
-        if (!e.getKey().startsWith(family + "|") && !e.getKey().equals(family)) {
-          // family key form is seller|id|name|type — full key adds |price
-          if (!e.getKey().startsWith(family + "|")) continue;
+        String[] row = e.getValue();
+
+        // Family from stored columns when key is exp-based
+        String rowFamily;
+        if (e.getKey().contains("|exp")) {
+          rowFamily = e.getKey().substring(0, e.getKey().lastIndexOf("|exp"));
+        } else if (e.getKey().startsWith(family + "|") || e.getKey().equals(family)) {
+          rowFamily = family;
+        } else {
+          // legacy key seller|id|name|type|price
+          String[] kp = e.getKey().split("\\|", 5);
+          if (kp.length >= 4) {
+            rowFamily = kp[0] + "|" + kp[1] + "|" + kp[2] + "|" + kp[3];
+          } else {
+            continue;
+          }
         }
-        if (!e.getKey().startsWith(family + "|")) continue;
-        try {
-          oldPrice = Double.parseDouble(e.getValue()[7].replace(",", ""));
-        } catch (Exception ignored) {
-          oldPrice = 0;
+        if (!rowFamily.equals(family)) continue;
+
+        long storedTl = parseTimeLeftSeconds(row.length > 10 ? row[10] : "");
+        long lastSeenEpoch = parseTimestampSeconds(row.length > 12 ? row[12] : "");
+        long expectedRemaining = storedTl;
+        if (storedTl >= 0 && lastSeenEpoch > 0 && nowEpoch > 0) {
+          long elapsed = Math.max(0, nowEpoch - lastSeenEpoch);
+          expectedRemaining = storedTl - elapsed;
         }
-        if (Math.abs(oldPrice - L.price) < 0.001) continue; // same price, different issue
-        softKey = e.getKey();
-        break;
+
+        if (pageRemaining < 0 || expectedRemaining < -60) continue;
+        long drift = Math.abs(pageRemaining - expectedRemaining);
+        if (drift > TIME_MATCH_TOLERANCE_SEC) continue;
+        if (drift < bestDrift) {
+          bestDrift = drift;
+          bestKey = e.getKey();
+          bestRow = row;
+          try {
+            bestOldPrice = Double.parseDouble(row[7].replace(",", ""));
+          } catch (Exception ignored) {
+            bestOldPrice = 0;
+          }
+        }
       }
 
-      if (softKey != null) {
-        claimedOldKeys.add(softKey);
-        String[] prev = existing.remove(softKey);
-        String firstSeen = prev != null && prev.length > 11 ? prev[11] : now;
-        existing.put(L.listingKey, toRow(L, firstSeen, now));
-        priceChanges.add(new PriceChange(L, oldPrice, L.price));
-        historyLines.add(String.join(",",
-                escape(now),
-                escape(L.listingKey),
-                escape(L.itemId),
-                escape(L.displayName),
-                escape(L.seller),
-                L.listingType,
-                String.format(Locale.US, "%.2f", oldPrice),
-                String.format(Locale.US, "%.2f", L.price),
-                escape(L.timeLeft)));
-      } else {
-        existing.put(L.listingKey, toRow(L, now, now));
-        newListings.add(L);
+      if (bestKey != null && bestRow != null) {
+        claimedOldKeys.add(bestKey);
+        claimedPageIdx.add(i);
+        String firstSeen = bestRow.length > 11 ? bestRow[11] : now;
+        // Keep stable key — only refresh columns
+        L.listingKey = bestKey;
+        existing.put(bestKey, toRow(L, firstSeen, now));
+
+        if (Math.abs(bestOldPrice - L.price) > 0.001) {
+          priceChanges.add(new PriceChange(L, bestOldPrice, L.price));
+          historyLines.add(String.join(",",
+                  escape(now),
+                  escape(bestKey),
+                  escape(L.itemId),
+                  escape(L.displayName),
+                  escape(L.seller),
+                  L.listingType,
+                  String.format(Locale.US, "%.2f", bestOldPrice),
+                  String.format(Locale.US, "%.2f", L.price),
+                  escape(L.timeLeft)));
+        }
       }
+    }
+
+    // Unmatched page listings → brand new stable keys
+    for (int i = 0; i < listings.size(); i++) {
+      if (claimedPageIdx.contains(i)) continue;
+      Listing L = listings.get(i);
+      String family = L.familyKey();
+      String key = stableKey(family, nowEpoch, pageTl[i]);
+      // Avoid rare collision if two brand-new share same expiry second
+      if (existing.containsKey(key) || claimedOldKeys.contains(key)) {
+        key = key + "x" + i;
+      }
+      L.listingKey = key;
+      existing.put(key, toRow(L, now, now));
+      newListings.add(L);
     }
 
     if (!historyLines.isEmpty()) {

@@ -5,6 +5,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ChatScreen;
 import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.tooltip.Tooltip;
 import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.text.Text;
@@ -23,15 +24,13 @@ import java.util.Locale;
 public class ContainerWorthScreen extends Screen {
 
     private static final int ROW_HEIGHT = 22;
-    private static final int HEADER_H = 48;
-    private static final int FOOTER_H = 28;
-    private static final int PAD = 12;
+    private static final int HEADER_H   = 48;
+    private static final int FOOTER_H   = 28;
+    private static final int PAD        = 12;
     private static final int WARP_BTN_W = 110;
     private static final int STACK_SIZE = 64;
 
-    /**
-     * Ticks to wait after /warp before running findsign (chunk load).
-     */
+    /** Ticks to wait after /warp before running findsign (chunk load). */
     private static final int FIND_DELAY_TICKS = 40;
 
     private final List<ContainerWorthHud.Entry> entries;
@@ -41,11 +40,9 @@ public class ContainerWorthScreen extends Screen {
     private final boolean signFinderLoaded;
 
     private int scrollOffset = 0;
-    private int maxScroll = 0;
+    private int maxScroll    = 0;
 
-    /**
-     * Hover hit-boxes for qty tooltips: [x0,y0,x1,y1] per visible row index.
-     */
+    /** Hover hit-boxes for qty tooltips: [x0,y0,x1,y1] per visible row index. */
     private final List<int[]> qtyHitBoxes = new ArrayList<>();
     private final List<List<Text>> qtyTooltips = new ArrayList<>();
 
@@ -101,9 +98,15 @@ public class ContainerWorthScreen extends Screen {
 
             final String cmd = warpCmd;
             final String itemName = e.name;
-            addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> onWarpOrFind(cmd, itemName))
-                    .dimensions(warpX, rowY, WARP_BTN_W, 20)
-                    .build());
+            String tipText = !cmd.isEmpty()
+                    ? cmd + (signFinderLoaded ? "  → then findsign" : "")
+                    : (signFinderLoaded ? ("findsign \"" + itemName + "\"") : "");
+            var btnBuilder = ButtonWidget.builder(Text.literal(label), b -> onWarpOrFind(cmd, itemName))
+                    .dimensions(warpX, rowY, WARP_BTN_W, 20);
+            if (!tipText.isEmpty()) {
+                btnBuilder.tooltip(Tooltip.of(Text.literal(tipText)));
+            }
+            addDrawableChild(btnBuilder.build());
         }
     }
 
@@ -135,17 +138,17 @@ public class ContainerWorthScreen extends Screen {
      */
     /**
      * Build a SignFinder client command.
-     * <p>
+     *
      * SignFinder registers pattern/query with StringArgumentType.string() — NOT
      * greedyString(). That means:
-     * - unquoted values are a single "word" and may not contain ( ) \ etc.
-     * - multi-word values MUST be wrapped in double quotes
-     * <p>
+     *   - unquoted values are a single "word" and may not contain ( ) \ etc.
+     *   - multi-word values MUST be wrapped in double quotes
+     *
      * Regex mode was abandoned: patterns like (?i)\b\QTuff\E\b contain
      * characters illegal in an unquoted string(), and ClientCommandInternals
      * often surfaces the command without quotes, which triggers:
-     * Expected whitespace to end one argument ... at ...ign regex
-     * <p>
+     *   Expected whitespace to end one argument ... at ...ign regex
+     *
      * Plain text search is substring-based ("Stick" can still match
      * "Sticky Piston") but is reliable. Multi-word names are quoted.
      */
@@ -197,18 +200,16 @@ public class ContainerWorthScreen extends Screen {
         return "/warp " + w;
     }
 
-    /**
-     * Parse shop buy-space from Stock/Space column; -1 if unknown.
-     */
+    /** Parse shop buy-space from Stock/Space column; -1 if unknown. */
     static int parseShopSpace(String stockSpace) {
         return Container_reader.parseShopSpace(stockSpace);
     }
 
     /**
      * Qty column for one allocation leg:
-     * - fully covered by this leg alone: "300"
-     * - this leg takes part of the chest: "150 / 300"  (leg amount / chest total)
-     * - unsellable remainder: "50 / 300" in grey (handled by color)
+     *   - fully covered by this leg alone: "300"
+     *   - this leg takes part of the chest: "150 / 300"  (leg amount / chest total)
+     *   - unsellable remainder: "50 / 300" in grey (handled by color)
      */
     static String formatQty(ContainerWorthHud.Entry e) {
         if (e.count == e.containerTotal) {
@@ -276,9 +277,9 @@ public class ContainerWorthScreen extends Screen {
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
 
         int nameX = PAD;
-        int qtyX = Math.min(210, this.width / 4);
+        int qtyX  = Math.min(210, this.width / 4);
         int unitX = Math.min(300, this.width / 3 + 20);
-        int subX = Math.min(390, this.width / 2 + 20);
+        int subX  = Math.min(390, this.width / 2 + 20);
         int warpX = this.width - PAD - WARP_BTN_W;
 
         ctx.drawText(textRenderer, "Item", nameX, listTop - 12, 0xFFAAAAAA, false);
