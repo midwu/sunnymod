@@ -14,11 +14,10 @@ import java.util.stream.Collectors;
 /**
  * F7 Auction House breakdown vs shop_data.
  *
- * Two modes (toggle button):
- *   CHEAP — AH price &lt; shop SELLING price (AH is a cheaper place to buy)
- *   FLIP  — AH price &lt; shop BUYING price (buy on AH, sell to a player shop)
- *
- * BUY_NOW rows are tinted differently from BID (BUY_NOW preferred for FLIP).
+ * Modes (cycle with button):
+ *   CHEAP   — AH &lt; shop SELLING (AH is a better buy)
+ *   FLIP    — AH &lt; shop BUYING (buy AH, sell to shop)
+ *   OVERPAY — AH &gt; shop SELLING (player shop is cheaper; don't buy AH)
  */
 public class AuctionProfitScreen extends Screen {
 
@@ -27,10 +26,10 @@ public class AuctionProfitScreen extends Screen {
   private static final int FOOTER_H   = 28;
   private static final int PAD        = 12;
 
-  /** Which opportunity kind is shown. */
   public enum Mode {
-    CHEAP("AH cheaper", "AH vs shop sell price"),
-    FLIP("AH→Shop flip", "Buy AH, sell to shop BUYING");
+    CHEAP("AH cheaper", "AH is cheaper than shop sell price"),
+    FLIP("AH→Shop flip", "Buy on AH, sell to shop BUYING"),
+    OVERPAY("Shop cheaper", "Player shop undercuts AH — you'd overpay");
 
     final String label;
     final String subtitle;
@@ -38,15 +37,23 @@ public class AuctionProfitScreen extends Screen {
       this.label = label;
       this.subtitle = subtitle;
     }
+
+    Mode next() {
+      return switch (this) {
+        case CHEAP -> FLIP;
+        case FLIP -> OVERPAY;
+        case OVERPAY -> CHEAP;
+      };
+    }
   }
 
   public static final class Opp {
-    /** "AH→Shop" (flip) or "AH cheaper" */
+    /** "AH→Shop" | "AH cheaper" | "Shop cheaper" */
     public final String kind;
     public final String displayName;
     public final String vanillaName;
     public final String seller;
-    public final String listingType; // BUY_NOW | BID
+    public final String listingType;
     public final double ahPrice;
     public final double shopPrice;
     public final double edge;
@@ -70,13 +77,10 @@ public class AuctionProfitScreen extends Screen {
       this.count = count;
     }
 
-    boolean isFlip() {
-      return "AH→Shop".equals(kind);
-    }
-
-    boolean isBuyNow() {
-      return "BUY_NOW".equalsIgnoreCase(listingType);
-    }
+    boolean isFlip() { return "AH→Shop".equals(kind); }
+    boolean isCheap() { return "AH cheaper".equals(kind); }
+    boolean isOverpay() { return "Shop cheaper".equals(kind); }
+    boolean isBuyNow() { return "BUY_NOW".equalsIgnoreCase(listingType); }
   }
 
   private final List<Opp> allOpps;
@@ -88,7 +92,6 @@ public class AuctionProfitScreen extends Screen {
   private List<Opp> visible = List.of();
   private int scrollOffset = 0;
   private int maxScroll = 0;
-  private ButtonWidget modeButton;
 
   public AuctionProfitScreen(List<Opp> opps, int listingCount, int newCount, int bidChangeCount) {
     super(Text.literal("Auction House"));
@@ -99,11 +102,18 @@ public class AuctionProfitScreen extends Screen {
     rebuildVisible();
   }
 
+  private boolean matchesMode(Opp o) {
+    return switch (mode) {
+      case FLIP -> o.isFlip();
+      case CHEAP -> o.isCheap();
+      case OVERPAY -> o.isOverpay();
+    };
+  }
+
   private void rebuildVisible() {
     visible = allOpps.stream()
-            .filter(o -> mode == Mode.FLIP ? o.isFlip() : !o.isFlip())
+            .filter(this::matchesMode)
             .sorted(Comparator
-                    // BUY_NOW first within mode (instant money / instant buy)
                     .comparing((Opp o) -> o.isBuyNow() ? 0 : 1)
                     .thenComparing(Comparator.comparingDouble((Opp o) -> o.edge).reversed()))
             .collect(Collectors.toList());
@@ -119,16 +129,15 @@ public class AuctionProfitScreen extends Screen {
     clearChildren();
     rebuildVisible();
 
-    modeButton = ButtonWidget.builder(
+    addDrawableChild(ButtonWidget.builder(
                     Text.literal("Mode: " + mode.label),
                     b -> {
-                      mode = (mode == Mode.CHEAP) ? Mode.FLIP : Mode.CHEAP;
+                      mode = mode.next();
                       b.setMessage(Text.literal("Mode: " + mode.label));
                       rebuildVisible();
                     })
-            .dimensions(PAD, this.height - FOOTER_H + 4, 160, 20)
-            .build();
-    addDrawableChild(modeButton);
+            .dimensions(PAD, this.height - FOOTER_H + 4, 170, 20)
+            .build());
 
     addDrawableChild(ButtonWidget.builder(Text.literal("Close"), b -> close())
             .dimensions(this.width - PAD - 80, this.height - FOOTER_H + 4, 80, 20)
@@ -143,12 +152,11 @@ public class AuctionProfitScreen extends Screen {
     ctx.drawText(textRenderer, mode.subtitle, PAD, 20, 0xFFAAAAAA, false);
 
     long flipN = allOpps.stream().filter(Opp::isFlip).count();
-    long cheapN = allOpps.size() - flipN;
+    long cheapN = allOpps.stream().filter(Opp::isCheap).count();
+    long overN = allOpps.stream().filter(Opp::isOverpay).count();
     String sub = String.format(Locale.US,
-            "%d listings · showing %d/%d · %d flip · %d cheaper · %d new · %d bidΔ",
-            listingCount, visible.size(),
-            mode == Mode.FLIP ? flipN : cheapN,
-            flipN, cheapN, newCount, bidChangeCount);
+            "%d listings · showing %d · %d flip · %d cheaper · %d overpay · %d new · %d bidΔ",
+            listingCount, visible.size(), flipN, cheapN, overN, newCount, bidChangeCount);
     ctx.drawText(textRenderer, sub, PAD, 34, 0xFF888888, false);
 
     int listTop = HEADER_H;
@@ -156,19 +164,21 @@ public class AuctionProfitScreen extends Screen {
     int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
 
     if (visible.isEmpty()) {
-      String empty = mode == Mode.FLIP
-              ? "No AH→Shop flips on this page (shop BUYING ≤ AH price, or no match)."
-              : "No cheaper-than-shop deals on this page.";
+      String empty = switch (mode) {
+        case FLIP -> "No AH→Shop flips on this page.";
+        case CHEAP -> "No AH-cheaper-than-shop deals on this page.";
+        case OVERPAY -> "No overpays — nothing on AH is pricier than a matching shop.";
+      };
       ctx.drawText(textRenderer, empty, PAD, listTop + 8, 0xFF888888, false);
     }
 
-    // Column headers
     int hy = listTop - 12;
     ctx.drawText(textRenderer, "Item", PAD, hy, 0xFF666666, false);
     ctx.drawText(textRenderer, "Type", this.width / 2 - 70, hy, 0xFF666666, false);
     ctx.drawText(textRenderer, "AH", this.width / 2 - 10, hy, 0xFF666666, false);
     ctx.drawText(textRenderer, "Shop", this.width / 2 + 50, hy, 0xFF666666, false);
-    ctx.drawText(textRenderer, "Edge", this.width - PAD - 90, hy, 0xFF666666, false);
+    String edgeHdr = mode == Mode.OVERPAY ? "Overpay" : "Edge";
+    ctx.drawText(textRenderer, edgeHdr, this.width - PAD - 90, hy, 0xFF666666, false);
 
     for (int i = 0; i < visibleRows; i++) {
       int idx = scrollOffset + i;
@@ -182,8 +192,13 @@ public class AuctionProfitScreen extends Screen {
         ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
       }
 
-      // Name colour by listing type: BUY_NOW = bright green, BID = gold
-      int nameColor = o.isBuyNow() ? 0xFF55FF55 : 0xFFFFCC55;
+      // Name: BUY_NOW green, BID gold; overpay mode forces reddish name tint
+      int nameColor;
+      if (mode == Mode.OVERPAY) {
+        nameColor = o.isBuyNow() ? 0xFFFF5555 : 0xFFFFAA55;
+      } else {
+        nameColor = o.isBuyNow() ? 0xFF55FF55 : 0xFFFFCC55;
+      }
       String name = o.displayName;
       int maxNameW = this.width / 2 - 90;
       if (textRenderer.getWidth(name) > maxNameW) {
@@ -194,7 +209,6 @@ public class AuctionProfitScreen extends Screen {
       }
       ctx.drawText(textRenderer, name, PAD, rowY + 4, nameColor, false);
 
-      // Type badge
       String typeLabel = o.isBuyNow() ? "BUY" : "BID";
       int typeColor = o.isBuyNow() ? 0xFF55FF55 : 0xFFFFAA00;
       ctx.drawText(textRenderer, typeLabel, this.width / 2 - 70, rowY + 4, typeColor, false);
@@ -203,23 +217,27 @@ public class AuctionProfitScreen extends Screen {
               this.width / 2 - 10, rowY + 4, 0xFFFFFFFF, false);
       ctx.drawText(textRenderer, String.format(Locale.US, "$%,.0f", o.shopPrice),
               this.width / 2 + 50, rowY + 4, 0xFFFFFFFF, false);
-      ctx.drawText(textRenderer, String.format(Locale.US, "+$%,.0f", o.edge),
-              this.width - PAD - 90, rowY + 4, 0xFF55FF55, false);
+
+      int edgeColor = mode == Mode.OVERPAY ? 0xFFFF5555 : 0xFF55FF55;
+      String edgeStr = mode == Mode.OVERPAY
+              ? String.format(Locale.US, "-$%,.0f", o.edge)
+              : String.format(Locale.US, "+$%,.0f", o.edge);
+      ctx.drawText(textRenderer, edgeStr, this.width - PAD - 90, rowY + 4, edgeColor, false);
 
       if (hover) {
         List<Text> tip = new ArrayList<>();
         tip.add(Text.literal(o.kind + " · " + o.listingType));
-        tip.add(Text.literal("Seller: " + o.seller));
+        tip.add(Text.literal("AH seller: " + o.seller));
         tip.add(Text.literal(String.format(Locale.US,
                 "AH $%,.2f  vs shop $%,.2f  (×%d)", o.ahPrice, o.shopPrice, o.count)));
         if (!o.shopOwner.isEmpty()) {
           String warp = o.shopWarp.isEmpty() ? "" : "  /" + o.shopWarp.replaceFirst("^/+", "");
           tip.add(Text.literal("Shop: " + o.shopOwner + warp));
         }
-        tip.add(Text.literal("Vanilla: " + o.vanillaName));
-        if (o.isFlip() && !o.isBuyNow()) {
-          tip.add(Text.literal("§eBID — not instant; may be outbid"));
+        if (o.isOverpay()) {
+          tip.add(Text.literal("§cBuy from the player shop instead of AH"));
         }
+        tip.add(Text.literal("Vanilla: " + o.vanillaName));
         ctx.drawTooltip(textRenderer, tip, mouseX, mouseY);
       }
     }
@@ -227,31 +245,22 @@ public class AuctionProfitScreen extends Screen {
     if (maxScroll > 0) {
       ctx.drawText(textRenderer, String.format("scroll %d/%d",
                       scrollOffset + 1, Math.min(scrollOffset + visibleRows, visible.size())),
-              PAD + 170, this.height - FOOTER_H + 8, 0xFF666666, false);
+              PAD + 180, this.height - FOOTER_H + 8, 0xFF666666, false);
     }
 
-    // Legend
-    ctx.drawText(textRenderer, "§aBUY_NOW §7instant  §eBID §7auction",
-            this.width / 2 - 60, this.height - FOOTER_H + 8, 0xFFAAAAAA, false);
+    ctx.drawText(textRenderer, "§aBUY §7/ §eBID",
+            this.width / 2 - 20, this.height - FOOTER_H + 8, 0xFFAAAAAA, false);
 
     super.render(ctx, mouseX, mouseY, delta);
   }
 
   @Override
   public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
-    if (vertical > 0 && scrollOffset > 0) {
-      scrollOffset--;
-      return true;
-    }
-    if (vertical < 0 && scrollOffset < maxScroll) {
-      scrollOffset++;
-      return true;
-    }
+    if (vertical > 0 && scrollOffset > 0) { scrollOffset--; return true; }
+    if (vertical < 0 && scrollOffset < maxScroll) { scrollOffset++; return true; }
     return super.mouseScrolled(mouseX, mouseY, horizontal, vertical);
   }
 
   @Override
-  public boolean shouldPause() {
-    return false;
-  }
+  public boolean shouldPause() { return false; }
 }

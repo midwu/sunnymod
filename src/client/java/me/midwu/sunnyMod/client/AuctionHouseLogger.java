@@ -169,34 +169,39 @@ public class AuctionHouseLogger implements ClientModInitializer {
       pendingScreen = null;
       try {
         CaptureResult result = captureAndUpsert(screen);
-        // Quiet: only chat when something is actually new or a bid moved
-        if (client.player != null && result.hasNews()) {
-          if (!result.newListings.isEmpty()) {
-            client.player.sendMessage(Text.literal(
-                    "§a[AH] §f" + result.newListings.size() + " §anew listing(s)"), false);
-            int shown = 0;
-            for (Listing L : result.newListings) {
-              if (shown++ >= 5) {
-                client.player.sendMessage(Text.literal("§7  …"), false);
-                break;
+        if (client.player != null) {
+          if (!result.hasNews()) {
+            client.player.sendMessage(Text.literal(String.format(
+                    "§7[AH] §f%d §7listings · no changes",
+                    result.totalOnPage)), false);
+          } else {
+            if (!result.newListings.isEmpty()) {
+              client.player.sendMessage(Text.literal(
+                      "§a[AH] §f" + result.newListings.size() + " §anew listing(s)"), false);
+              int shown = 0;
+              for (Listing L : result.newListings) {
+                if (shown++ >= 5) {
+                  client.player.sendMessage(Text.literal("§7  …"), false);
+                  break;
+                }
+                client.player.sendMessage(Text.literal(String.format(Locale.US,
+                        "§7  + §f%s §7@ §f$%,.0f §8(%s)",
+                        L.displayName, L.price, L.seller)), false);
               }
-              client.player.sendMessage(Text.literal(String.format(Locale.US,
-                      "§7  + §f%s §7@ §f$%,.0f §8(%s)",
-                      L.displayName, L.price, L.seller)), false);
             }
-          }
-          if (!result.priceChanges.isEmpty()) {
-            client.player.sendMessage(Text.literal(
-                    "§e[AH] §f" + result.priceChanges.size() + " §eprice/bid change(s)"), false);
-            int shown = 0;
-            for (PriceChange pc : result.priceChanges) {
-              if (shown++ >= 5) {
-                client.player.sendMessage(Text.literal("§7  …"), false);
-                break;
+            if (!result.priceChanges.isEmpty()) {
+              client.player.sendMessage(Text.literal(
+                      "§e[AH] §f" + result.priceChanges.size() + " §eprice/bid change(s)"), false);
+              int shown = 0;
+              for (PriceChange pc : result.priceChanges) {
+                if (shown++ >= 5) {
+                  client.player.sendMessage(Text.literal("§7  …"), false);
+                  break;
+                }
+                client.player.sendMessage(Text.literal(String.format(Locale.US,
+                        "§7  §f%s §7$%,.0f → §f$%,.0f §8(%s)",
+                        pc.listing.displayName, pc.oldPrice, pc.newPrice, pc.listing.seller)), false);
               }
-              client.player.sendMessage(Text.literal(String.format(Locale.US,
-                      "§7  §f%s §7$%,.0f → §f$%,.0f §8(%s)",
-                      pc.listing.displayName, pc.oldPrice, pc.newPrice, pc.listing.seller)), false);
             }
           }
         }

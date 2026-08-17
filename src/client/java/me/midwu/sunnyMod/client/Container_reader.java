@@ -340,14 +340,22 @@ public class Container_reader implements ClientModInitializer {
                         L.price, shopSells.price, save,
                         shopSells.owner, shopSells.warp, L.count));
             }
+            // AH costs more than a player shop SELLING — you'd overpay on AH
+            if (shopSells != null && L.price > shopSells.price) {
+                double overpay = (L.price - shopSells.price) * L.count;
+                opps.add(new AuctionProfitScreen.Opp(
+                        "Shop cheaper", L.displayName, L.vanillaName, L.seller, L.listingType,
+                        L.price, shopSells.price, overpay,
+                        shopSells.owner, shopSells.warp, L.count));
+            }
         }
 
         long flipN = opps.stream().filter(o -> "AH→Shop".equals(o.kind)).count();
-        long cheapN = opps.size() - flipN;
-        // Brief chat summary; F7 screen has mode toggle (CHEAP / FLIP)
+        long cheapN = opps.stream().filter(o -> "AH cheaper".equals(o.kind)).count();
+        long overN = opps.stream().filter(o -> "Shop cheaper".equals(o.kind)).count();
         client.player.sendMessage(Text.literal(String.format(
-                "§a[AH] §f%d §alistings · §f%d §aflip · §f%d §acheaper · §f%d §anew · §f%d §abidΔ",
-                listings.size(), flipN, cheapN,
+                "§a[AH] §f%d §alistings · §f%d §aflip · §f%d §acheaper · §c%d §coverpay · §f%d §anew · §f%d §abidΔ",
+                listings.size(), flipN, cheapN, overN,
                 result.newListings.size(), result.priceChanges.size())), false);
 
         // Leave AH open on server? Closing avoids locked-state issues similar to chests.
