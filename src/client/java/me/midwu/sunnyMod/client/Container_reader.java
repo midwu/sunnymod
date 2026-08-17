@@ -275,10 +275,12 @@ public class Container_reader implements ClientModInitializer {
             }
         }
 
-        // Brief chat summary only; details live on the screen
+        long flipN = opps.stream().filter(o -> "AH→Shop".equals(o.kind)).count();
+        long cheapN = opps.size() - flipN;
+        // Brief chat summary; F7 screen has mode toggle (CHEAP / FLIP)
         client.player.sendMessage(Text.literal(String.format(
-                "§a[AH] §f%d §alistings · §f%d §aopportunities · §f%d §anew · §f%d §abid changes",
-                listings.size(), opps.size(),
+                "§a[AH] §f%d §alistings · §f%d §aflip · §f%d §acheaper · §f%d §anew · §f%d §abidΔ",
+                listings.size(), flipN, cheapN,
                 result.newListings.size(), result.priceChanges.size())), false);
 
         // Leave AH open on server? Closing avoids locked-state issues similar to chests.
