@@ -4,7 +4,16 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.recipe.CraftingRecipe;
+import net.minecraft.recipe.Ingredient;
+import net.minecraft.recipe.Recipe;
+import net.minecraft.recipe.RecipeEntry;
+import net.minecraft.recipe.RecipeType;
+import net.minecraft.recipe.ServerRecipeManager;
+import net.minecraft.recipe.input.CraftingRecipeInput;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
@@ -14,6 +23,9 @@ import net.minecraft.resource.ResourceManager;
 import net.minecraft.util.Identifier;
 
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.stream.Stream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -114,10 +126,27 @@ public final class CraftingProfit {
         if (cached != null) return cached;
 
         List<Recipe> built = new ArrayList<>(compactionRecipes());
+        // Always ensure iron chain (common profit case) even if loaders fail
+        built.add(new Recipe("minecraft:iron_chain", "Iron Chain", 16,
+                List.of(
+                        Need.exact("Iron Nugget", 2),
+                        Need.exact("Iron Ingot", 1)
+                )));
+
+        int fromServer = 0, fromJar = 0;
         try {
-            built.addAll(loadFromDatapackJson());
+            List<Recipe> server = loadFromIntegratedServer();
+            fromServer = server.size();
+            built.addAll(server);
         } catch (Throwable t) {
-            System.err.println("[CraftingProfit] Datapack recipe load failed: " + t.getMessage());
+            System.err.println("[CraftingProfit] Server recipe load failed: " + t.getMessage());
+        }
+        try {
+            List<Recipe> jar = loadFromMinecraftJar();
+            fromJar = jar.size();
+            built.addAll(jar);
+        } catch (Throwable t) {
+            System.err.println("[CraftingProfit] Jar recipe load failed: " + t.getMessage());
         }
 
         Map<String, Recipe> byId = new LinkedHashMap<>();
@@ -126,7 +155,8 @@ public final class CraftingProfit {
         }
         List<Recipe> list = List.copyOf(byId.values());
         cachedRecipes = list;
-        System.out.println("[CraftingProfit] Loaded " + list.size() + " craft recipes");
+        System.out.println("[CraftingProfit] Loaded " + list.size()
+                + " craft recipes (server=" + fromServer + ", jar=" + fromJar + ")");
         return list;
     }
 
@@ -149,29 +179,97 @@ public final class CraftingProfit {
     }
 
     /**
-     * Parse all {@code data/&#42;/recipe/*.json} crafting_shaped / crafting_shapeless
-     * from the client resource manager (vanilla jar + datapacks).
+     * Singleplayer / LAN: integrated server has {@link ServerRecipeManager#values()}.
+     * Multiplayer clients have no server — jar loader is used instead.
      */
-    private static List<Recipe> loadFromDatapackJson() {
+    private static List<Recipe> loadFromIntegratedServer() {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client == null) return List.of();
-        ResourceManager resources = client.getResourceManager();
-        if (resources == null) return List.of();
+        MinecraftServer server = client.getServer();
+        if (server == null) return List.of();
 
-        Map<Identifier, Resource> found = resources.findResources(
-                "recipe",
-                id -> id.getPath().endsWith(".json"));
+        var rm = server.getRecipeManager();
+        if (!(rm instanceof ServerRecipeManager srm)) return List.of();
+
+        List<ItemStack> empty9 = new ArrayList<>(9);
+        for (int i = 0; i < 9; i++) empty9.add(ItemStack.EMPTY);
+        CraftingRecipeInput emptyInput = CraftingRecipeInput.create(3, 3, empty9);
+        var lookup = server.getRegistryManager();
 
         List<Recipe> out = new ArrayList<>();
-        for (Map.Entry<Identifier, Resource> e : found.entrySet()) {
-            Identifier id = e.getKey();
-            try (InputStreamReader reader = new InputStreamReader(
-                    e.getValue().getInputStream(), StandardCharsets.UTF_8)) {
-                JsonObject root = JsonParser.parseReader(reader).getAsJsonObject();
-                Recipe parsed = parseCraftingJson(id.toString(), root);
-                if (parsed != null) out.add(parsed);
+        for (RecipeEntry<?> entry : srm.values()) {
+            try {
+                net.minecraft.recipe.Recipe<?> raw = entry.value();
+                if (raw.getType() != RecipeType.CRAFTING) continue;
+                if (!(raw instanceof CraftingRecipe crafting)) continue;
+
+                ItemStack result = crafting.craft(emptyInput, lookup);
+                if (result == null || result.isEmpty()) continue;
+                String outName = stripFormatting(result.getItem().getName().getString());
+                if (outName.isEmpty()) continue;
+                int outCount = Math.max(1, result.getCount());
+
+                var placement = crafting.getIngredientPlacement();
+                if (placement == null) continue;
+                List<Ingredient> ingredients = placement.getIngredients();
+                if (ingredients == null || ingredients.isEmpty()) continue;
+
+                Map<String, Need> merged = new LinkedHashMap<>();
+                for (Ingredient ing : ingredients) {
+                    if (ing == null || ing.isEmpty()) continue;
+                    List<String> names = expandIngredient(ing);
+                    if (names.isEmpty()) continue;
+                    addNeed(merged, names, 1);
+                }
+                if (merged.isEmpty()) continue;
+
+                String id = entry.id().getValue().toString();
+                out.add(new Recipe(id, outName, outCount, List.copyOf(merged.values())));
             } catch (Throwable ignored) {
-                // skip bad / special recipes
+            }
+        }
+        return out;
+    }
+
+    private static List<String> expandIngredient(Ingredient ing) {
+        List<String> names = new ArrayList<>();
+        try {
+            ing.getMatchingItems().forEach(entry -> {
+                String n = stripFormatting(entry.value().getName().getString());
+                if (!n.isEmpty() && !names.contains(n)) names.add(n);
+            });
+        } catch (Throwable t) {
+            // fallback: test all items is too slow here — skip
+        }
+        return names.size() > 64 ? List.of() : names;
+    }
+
+    /**
+     * Read {@code data/minecraft/recipe/*.json} from the minecraft game jar
+     * (works on multiplayer clients where there is no integrated server).
+     */
+    private static List<Recipe> loadFromMinecraftJar() {
+        List<Recipe> out = new ArrayList<>();
+        var opt = FabricLoader.getInstance().getModContainer("minecraft");
+        if (opt.isEmpty()) return out;
+
+        for (Path root : opt.get().getRootPaths()) {
+            Path recipeDir = root.resolve("data/minecraft/recipe");
+            if (!Files.isDirectory(recipeDir)) continue;
+            try (Stream<Path> walk = Files.walk(recipeDir)) {
+                walk.filter(p -> p.toString().endsWith(".json")).forEach(p -> {
+                    try (InputStreamReader reader = new InputStreamReader(
+                            Files.newInputStream(p), StandardCharsets.UTF_8)) {
+                        JsonObject rootJson = JsonParser.parseReader(reader).getAsJsonObject();
+                        String id = "minecraft:" + recipeDir.relativize(p).toString()
+                                .replace('\\', '/').replace(".json", "");
+                        Recipe parsed = parseCraftingJson(id, rootJson);
+                        if (parsed != null) out.add(parsed);
+                    } catch (Throwable ignored) {
+                    }
+                });
+            } catch (Throwable t) {
+                System.err.println("[CraftingProfit] walk " + recipeDir + ": " + t.getMessage());
             }
         }
         return out;
