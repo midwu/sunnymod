@@ -544,8 +544,11 @@ public final class CraftingProfit {
         dbg("bag: " + clean);
         dbg("base sell value: " + String.format(Locale.US, "%.2f", base));
         dbg("sellable/useful outputs: " + useful.size() + "  candidates: " + candidates.size());
-        if (useful.contains("Shears") || useful.stream().anyMatch(s -> s.equalsIgnoreCase("Shears"))) {
-            dbg("WARNING: Shears marked useful (someone buys them, or intermediate?)");
+        for (String u : useful) {
+            if (u.equalsIgnoreCase("Shears")) {
+                dbg("WARNING: Shears marked useful — BUYING price=" + bestUnitPrice(offers, u)
+                        + " (from shop_data). Crafting shears is allowed only because of that.");
+            }
         }
         // Sample bag-relevant candidates (inputs intersect bag)
         int shown = 0;
@@ -599,6 +602,7 @@ public final class CraftingProfit {
         }
     }
 
+
     private static void search(
             Map<String, Integer> bag,
             Map<String, List<Container_reader.BestBuyOffer>> offers,
@@ -620,37 +624,80 @@ public final class CraftingProfit {
         if (depthLeft <= 0) return;
 
         for (Recipe recipe : candidates) {
-            // Skip dead-end products: output not sellable and not an intermediate we still need
             if (!useful.contains(recipe.output())) continue;
 
             int max = maxCrafts(recipe, bag);
             if (max <= 0) continue;
 
-            // Try full batch only (greedy). Skip if this craft alone would
-            // destroy all sellable value with no priced output (quick reject).
-            Map<String, Integer> next = applyCraft(recipe, bag, max);
-            if (next.equals(bag)) continue;
+            // Inverse of last step? skip (stops pack↔unpack loops)
+            if (isInverseOfLast(stepsSoFar, recipe)) continue;
 
-            double nextVal = bagValue(next, offers);
-            double outPrice = bestUnitPrice(offers, recipe.output());
-            // If output itself is not sellable, only keep exploring if we still
-            // have depth to craft it further into something sellable.
-            if (outPrice <= 0 && depthLeft <= 1) {
-                // Last step cannot be an unpriced intermediate
-                continue;
-            }
-            // Optional prune: if value already far below best and output unpriced, skip
-            if (outPrice <= 0 && nextVal < best.value * 0.5 && nextVal < here) {
-                continue;
-            }
+            // Try several batch sizes — full-max only is too greedy
+            // (e.g. all iron→nuggets leaves none for iron_chain)
+            for (int times : batchSizes(max)) {
+                if (times <= 0) continue;
+                Map<String, Integer> next = applyCraft(recipe, bag, times);
+                if (next.equals(bag)) continue;
 
-            String step = String.format(Locale.US, "%dx %s → %s",
-                    max, shortId(recipe.id()), recipe.output());
-            if (stepsSoFar.contains(step)) continue;
-            List<String> nextSteps = new ArrayList<>(stepsSoFar);
-            nextSteps.add(step);
-            search(next, offers, depthLeft - 1, nextSteps, best, candidates, useful);
+                double nextVal = bagValue(next, offers);
+                double outPrice = bestUnitPrice(offers, recipe.output());
+
+                // Terminal (priced) craft must not lose money this step
+                if (outPrice > 0 && nextVal < here - 0.001) continue;
+
+                // Unpriced intermediate: only with depth left to turn into something sellable
+                if (outPrice <= 0 && depthLeft <= 1) continue;
+
+                String step = String.format(Locale.US, "%dx %s → %s",
+                        times, shortId(recipe.id()), recipe.output());
+                if (stepsSoFar.contains(step)) continue;
+
+                List<String> nextSteps = new ArrayList<>(stepsSoFar);
+                nextSteps.add(step);
+                search(next, offers, depthLeft - 1, nextSteps, best, candidates, useful);
+            }
         }
+    }
+
+    /** 1, ~25%, ~50%, max — covers partial multi-input crafts without exploding. */
+    private static int[] batchSizes(int max) {
+        if (max <= 1) return new int[]{max};
+        if (max == 2) return new int[]{1, 2};
+        int a = Math.max(1, max / 4);
+        int b = Math.max(1, max / 2);
+        // unique sorted
+        java.util.LinkedHashSet<Integer> set = new java.util.LinkedHashSet<>();
+        set.add(1);
+        set.add(a);
+        set.add(b);
+        set.add(max);
+        int[] out = new int[set.size()];
+        int i = 0;
+        for (int v : set) out[i++] = v;
+        return out;
+    }
+
+    /**
+     * True if this recipe undoes the last step (e.g. pack then unpack same block).
+     * Uses compaction pairs + "unpack_X"/"pack_X" id patterns.
+     */
+    private static boolean isInverseOfLast(List<String> stepsSoFar, Recipe recipe) {
+        if (stepsSoFar.isEmpty()) return false;
+        String last = stepsSoFar.get(stepsSoFar.size() - 1);
+        // last looks like "7x pack_Block of Iron → Block of Iron"
+        String id = shortId(recipe.id());
+        if (last.contains("pack_") && id.startsWith("unpack_")) {
+            // same subject?
+            String subj = id.substring("unpack_".length());
+            if (last.contains("pack_" + subj)) return true;
+        }
+        if (last.contains("unpack_") && id.startsWith("pack_")) {
+            String subj = id.substring("pack_".length());
+            if (last.contains("unpack_" + subj)) return true;
+        }
+        // generic: last produced exactly this recipe's main input and this produces last's output inverse
+        // (lightweight): if last output name equals one of our inputs and our output equals last's consumed type — skip
+        return false;
     }
 
     private static String shortId(String id) {
