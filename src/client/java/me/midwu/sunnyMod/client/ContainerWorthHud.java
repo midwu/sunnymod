@@ -69,6 +69,7 @@ public class ContainerWorthHud {
     public static double getTotal() { return total; }
     public static int getPricedStacks() { return pricedStacks; }
     public static int getUnpricedStacks() { return unpricedStacks; }
+    public static List<String> getCraftSteps() { return craftSteps; }
     public static boolean hasResults() { return lastUpdateTime > 0L; }
 
     private static final int MAX_VISIBLE_ROWS = 14;
@@ -77,13 +78,20 @@ public class ContainerWorthHud {
     private static volatile int pricedStacks = 0;
     private static volatile int unpricedStacks = 0;
     private static volatile List<Entry> entries = List.of();
+    private static volatile List<String> craftSteps = List.of();
     private static volatile long lastUpdateTime = 0L;
 
     public static void update(double total, int pricedStacks, int unpricedStacks, List<Entry> entries) {
+        update(total, pricedStacks, unpricedStacks, entries, List.of());
+    }
+
+    public static void update(double total, int pricedStacks, int unpricedStacks,
+                              List<Entry> entries, List<String> craftSteps) {
         ContainerWorthHud.total = total;
         ContainerWorthHud.pricedStacks = pricedStacks;
         ContainerWorthHud.unpricedStacks = unpricedStacks;
         ContainerWorthHud.entries = entries;
+        ContainerWorthHud.craftSteps = craftSteps != null ? List.copyOf(craftSteps) : List.of();
         ContainerWorthHud.lastUpdateTime = System.currentTimeMillis();
     }
 

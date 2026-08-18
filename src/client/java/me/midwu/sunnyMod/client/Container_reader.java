@@ -215,7 +215,8 @@ public class Container_reader implements ClientModInitializer {
                                 ContainerWorthHud.getEntries(),
                                 ContainerWorthHud.getTotal(),
                                 ContainerWorthHud.getPricedStacks(),
-                                ContainerWorthHud.getUnpricedStacks()));
+                                ContainerWorthHud.getUnpricedStacks(),
+                                ContainerWorthHud.getCraftSteps()));
                     } else {
                         client.player.sendMessage(Text.literal(
                                 "§e[ContainerReader] No previous scan. Open a chest and press F7 first."), false);
@@ -418,102 +419,88 @@ public class Container_reader implements ClientModInitializer {
         int unpricedStacks = 0;
         List<String> missingItems = new ArrayList<>();
 
-        // Aggregate by display name (custom OP items stay distinct from vanilla).
-        Map<String, Integer> countByName = new LinkedHashMap<>();
-        Map<String, String> vanillaByDisplay = new HashMap<>();
+        // Split stacks: plain commodities may craft; custom/OP never do.
+        Map<String, Integer> vanillaCounts = new HashMap<>(); // craft bag (plain only)
+        Map<String, Integer> customCounts = new LinkedHashMap<>(); // sell-only
+        Map<String, String> customVanilla = new HashMap<>(); // display → item vanilla name
 
+        int totalStacks = 0;
         for (Slot slot : screen.getScreenHandler().slots) {
-            // HandledScreen includes the player's 36 inv slots at the bottom.
-            // Only value the actual container/chest portion.
             if (slot.inventory instanceof PlayerInventory) continue;
-
             ItemStack stack = slot.getStack();
             if (stack.isEmpty()) continue;
-
-            String display = stripFormatting(stack.getName().getString());
-            String vanilla = stripFormatting(stack.getItem().getName().getString());
-            if (display.isEmpty()) display = vanilla;
+            totalStacks++;
             int count = stack.getCount();
-            countByName.merge(display, count, Integer::sum);
-            vanillaByDisplay.putIfAbsent(display, vanilla);
+            String vanilla = CraftingProfit.stripFormatting(stack.getItem().getName().getString());
+            if (CraftingProfit.isPlainCommodity(stack)) {
+                // No CUSTOM_NAME and display == vanilla — safe craft ingredient
+                vanillaCounts.merge(vanilla, count, Integer::sum);
+            } else {
+                // OP / renamed / mismatched display — sell as-is, never craft
+                String display = CraftingProfit.stripFormatting(stack.getName().getString());
+                if (display.isEmpty()) display = vanilla;
+                customCounts.merge(display, count, Integer::sum);
+                customVanilla.putIfAbsent(display, vanilla);
+            }
         }
 
-        if (countByName.isEmpty()) {
+        if (totalStacks == 0) {
             client.player.sendMessage(Text.literal(
                     "§e[ContainerReader] Container is empty — nothing to value."), false);
             return;
         }
 
-        // Allocate each item across shops (highest price first) until the
-        // chest amount is covered or no more buy-space remains.
+        // Full vanilla book (RecipeManager) + compaction; depth 3 nested crafts
+        CraftingProfit.Plan plan = CraftingProfit.optimize(vanillaCounts, allOffers, 3);
+
         List<ContainerWorthHud.Entry> entries = new ArrayList<>();
-        for (Map.Entry<String, Integer> e : countByName.entrySet()) {
+        List<String> craftNotes = new ArrayList<>(plan.steps());
+
+        // Sell optimized plain bag (after crafts)
+        for (Map.Entry<String, Integer> e : plan.finalCounts().entrySet()) {
             String name = e.getKey();
+            int count = e.getValue();
+            if (count <= 0) continue;
+            String label = name;
+            if (!craftNotes.isEmpty() && vanillaCounts.getOrDefault(name, 0) != count) {
+                label = name + " §8(crafted)";
+            }
+            double[] acc = allocateItem(entries, label, count, name, allOffers, missingItems);
+            total += acc[0];
+            pricedStacks += (int) acc[1];
+            unpricedStacks += (int) acc[2];
+        }
+
+        // Custom / OP items: never crafted, matched by display then vanilla for shops
+        for (Map.Entry<String, Integer> e : customCounts.entrySet()) {
+            String display = e.getKey();
             int containerCount = e.getValue();
-            String vanilla = vanillaByDisplay.getOrDefault(name, name);
-            java.util.List<BestBuyOffer> offers = lookupOffers(allOffers, name, vanilla);
-
-            if (offers.isEmpty()) {
-                unpricedStacks++; // counted once per distinct item for summary
-                if (missingItems.size() < 6) missingItems.add(name);
-                entries.add(ContainerWorthHud.Entry.unsellable(name, containerCount));
-                continue;
-            }
-
-            int remaining = containerCount;
-            boolean anyPriced = false;
-            for (BestBuyOffer offer : offers) {
-                if (remaining <= 0) break;
-                int space = parseShopSpace(offer.stockSpace);
-                int take;
-                if (space < 0) {
-                    // Unknown capacity — treat as able to take the rest
-                    take = remaining;
-                } else if (space == 0) {
-                    continue; // shop full
-                } else {
-                    take = Math.min(remaining, space);
-                }
-                if (take <= 0) continue;
-
-                entries.add(new ContainerWorthHud.Entry(
-                        name, take, containerCount, offer, space));
-                total += offer.price * take;
-                remaining -= take;
-                anyPriced = true;
-            }
-
-            if (anyPriced) {
-                pricedStacks++; // distinct items with at least one priced leg
-            }
-            if (remaining > 0) {
-                // Leftover with no more shops — same treatment as "no price"
-                unpricedStacks++;
-                entries.add(ContainerWorthHud.Entry.unsellable(name, remaining, containerCount));
-                if (!missingItems.contains(name) && missingItems.size() < 6) {
-                    missingItems.add(name + " (partial)");
-                }
-            }
+            String vanilla = customVanilla.getOrDefault(display, display);
+            // lookupOffers(display, vanilla): custom name first, no fall-through to commodity
+            double[] acc = allocateItem(entries, display, containerCount, display, vanilla, allOffers, missingItems);
+            total += acc[0];
+            pricedStacks += (int) acc[1];
+            unpricedStacks += (int) acc[2];
         }
 
         entries.sort((a, b) -> Double.compare(b.subtotal, a.subtotal));
-        ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries);
+        ContainerWorthHud.update(total, pricedStacks, unpricedStacks, entries, craftNotes);
 
-        // One-line chat summary; full interactive breakdown is on the screen.
-        client.player.sendMessage(Text.literal(
-                "§a[ContainerReader] Chest worth: §f$" + String.format(Locale.US, "%,.2f", total) +
-                        " §7(" + countByName.size() + " items, " +
-                        pricedStacks + " priced / " + unpricedStacks + " unpriced stacks)"), false);
-
-        if (!missingItems.isEmpty()) {
-            client.player.sendMessage(Text.literal(
-                    "§eNo BUYING price for: §f" + String.join("§7, §f", missingItems) +
-                            (unpricedStacks > missingItems.size() ? "§7, …" : "")), false);
+        // Minimal chat — details live on the F7 screen
+        int considered = plan.recipesConsidered();
+        if (plan.improved()) {
+            client.player.sendMessage(Text.literal(String.format(Locale.US,
+                    "§a[F7] §f$%,.0f §7· considered §f%d §7recipes · §abetter path found §7→ see screen",
+                    total, considered)), false);
+        } else {
+            client.player.sendMessage(Text.literal(String.format(Locale.US,
+                    "§a[F7] §f$%,.0f §7· considered §f%d §7recipes · none better than selling as-is",
+                    total, considered)), false);
         }
 
         if (pricedStacks == 0 && allOffers.isEmpty()) {
             client.player.sendMessage(Text.literal(
-                    "§cNo BUYING offers loaded. Open a server sell menu or scan player shops first."), false);
+                    "§c[F7] No BUYING offers loaded. Open /shop or scan player shops first."), false);
         }
 
         // Close the container on the server first, otherwise the server keeps the
@@ -521,7 +508,66 @@ public class Container_reader implements ClientModInitializer {
         if (client.player != null) {
             client.player.closeHandledScreen();
         }
-        client.setScreen(new ContainerWorthScreen(entries, total, pricedStacks, unpricedStacks));
+        client.setScreen(new ContainerWorthScreen(entries, total, pricedStacks, unpricedStacks, craftNotes));
+    }
+
+
+    /**
+     * Cascade-allocate {@code count} of an item across BUYING shops.
+     * @param lookupName display/vanilla name for offer lookup
+     * @return double[]{ totalValue, pricedStacksDelta, unpricedStacksDelta }
+     */
+    private static double[] allocateItem(
+            List<ContainerWorthHud.Entry> entries,
+            String displayLabel,
+            int count,
+            String lookupName,
+            Map<String, java.util.List<BestBuyOffer>> allOffers,
+            List<String> missingItems) {
+        return allocateItem(entries, displayLabel, count, lookupName, lookupName, allOffers, missingItems);
+    }
+
+    private static double[] allocateItem(
+            List<ContainerWorthHud.Entry> entries,
+            String displayLabel,
+            int count,
+            String displayName,
+            String vanillaName,
+            Map<String, java.util.List<BestBuyOffer>> allOffers,
+            List<String> missingItems) {
+        if (count <= 0) return new double[]{0, 0, 0};
+        java.util.List<BestBuyOffer> offers = lookupOffers(allOffers, displayName, vanillaName);
+        if (offers.isEmpty()) {
+            if (missingItems.size() < 6) missingItems.add(displayLabel);
+            entries.add(ContainerWorthHud.Entry.unsellable(displayLabel, count));
+            return new double[]{0, 0, 1};
+        }
+        double value = 0;
+        int remaining = count;
+        boolean anyPriced = false;
+        for (BestBuyOffer offer : offers) {
+            if (remaining <= 0) break;
+            int space = parseShopSpace(offer.stockSpace);
+            int take;
+            if (space < 0) take = remaining;
+            else if (space == 0) continue;
+            else take = Math.min(remaining, space);
+            if (take <= 0) continue;
+            entries.add(new ContainerWorthHud.Entry(displayLabel, take, count, offer, space));
+            value += offer.price * take;
+            remaining -= take;
+            anyPriced = true;
+        }
+        int priced = anyPriced ? 1 : 0;
+        int unpriced = 0;
+        if (remaining > 0) {
+            unpriced = 1;
+            entries.add(ContainerWorthHud.Entry.unsellable(displayLabel, remaining, count));
+            if (missingItems.size() < 6 && !missingItems.contains(displayLabel + " (partial)")) {
+                missingItems.add(displayLabel + " (partial)");
+            }
+        }
+        return new double[]{value, priced, unpriced};
     }
 
     /**

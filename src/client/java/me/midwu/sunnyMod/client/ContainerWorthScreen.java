@@ -37,6 +37,7 @@ public class ContainerWorthScreen extends Screen {
     private final double total;
     private final int pricedStacks;
     private final int unpricedStacks;
+    private final List<String> craftSteps;
     private final boolean signFinderLoaded;
 
     private int scrollOffset = 0;
@@ -48,19 +49,32 @@ public class ContainerWorthScreen extends Screen {
 
     public ContainerWorthScreen(List<ContainerWorthHud.Entry> entries,
                                 double total, int pricedStacks, int unpricedStacks) {
+        this(entries, total, pricedStacks, unpricedStacks, List.of());
+    }
+
+    public ContainerWorthScreen(List<ContainerWorthHud.Entry> entries,
+                                double total, int pricedStacks, int unpricedStacks,
+                                List<String> craftSteps) {
         super(Text.literal("Chest Worth"));
         this.entries = entries != null ? List.copyOf(entries) : List.of();
         this.total = total;
         this.pricedStacks = pricedStacks;
         this.unpricedStacks = unpricedStacks;
+        this.craftSteps = craftSteps != null ? List.copyOf(craftSteps) : List.of();
         this.signFinderLoaded = FabricLoader.getInstance().isModLoaded("signfinder");
+    }
+
+    private int headerHeight() {
+        if (craftSteps.isEmpty()) return HEADER_H;
+        int shown = Math.min(craftSteps.size(), 5);
+        return 40 + 12 + shown * 11 + 8; // title, total, label, steps, pad
     }
 
     @Override
     protected void init() {
         clearChildren();
         scrollOffset = 0;
-        int listTop = HEADER_H;
+        int listTop = headerHeight();
         int listBottom = this.height - FOOTER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         maxScroll = Math.max(0, entries.size() - visibleRows);
@@ -78,7 +92,7 @@ public class ContainerWorthScreen extends Screen {
                 .dimensions(this.width - PAD - 80, this.height - FOOTER_H + 4, 80, 20)
                 .build());
 
-        int listTop = HEADER_H;
+        int listTop = headerHeight();
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
         int warpX = this.width - PAD - WARP_BTN_W;
 
@@ -262,16 +276,41 @@ public class ContainerWorthScreen extends Screen {
         ctx.drawCenteredTextWithShadow(textRenderer, "Chest Worth", this.width / 2, 10, 0xFFFFD700);
         String totalLine = "Total: $" + String.format(Locale.US, "%,.2f", total) +
                 "   (" + pricedStacks + " priced / " + unpricedStacks + " unpriced stacks, " +
-                entries.size() + " items)";
+                entries.size() + " rows)";
         ctx.drawCenteredTextWithShadow(textRenderer, totalLine, this.width / 2, 24, 0xFFFFFFFF);
+
+        int y = 38;
+        if (!craftSteps.isEmpty()) {
+            ctx.drawText(textRenderer, "Craft path (sell after these steps):", PAD, y, 0xFF55FFFF, false);
+            y += 12;
+            int shown = Math.min(craftSteps.size(), 5);
+            for (int s = 0; s < shown; s++) {
+                String step = craftSteps.get(s);
+                // "2x unpack_Block of Iron → Iron Ingot" → nicer arrow chain
+                String pretty = step.replace(" → ", "  →  ");
+                if (textRenderer.getWidth(pretty) > this.width - PAD * 2) {
+                    while (textRenderer.getWidth(pretty + "…") > this.width - PAD * 2 && pretty.length() > 8) {
+                        pretty = pretty.substring(0, pretty.length() - 1);
+                    }
+                    pretty = pretty + "…";
+                }
+                ctx.drawText(textRenderer, "  " + (s + 1) + ". " + pretty, PAD, y, 0xFFAAFFFF, false);
+                y += 11;
+            }
+            if (craftSteps.size() > 5) {
+                ctx.drawText(textRenderer, "  … +" + (craftSteps.size() - 5) + " more", PAD, y, 0xFF668888, false);
+            }
+        } else {
+            ctx.drawText(textRenderer, "Craft path: none (sell as-is)", PAD, y, 0xFF666666, false);
+        }
 
         if (entries.isEmpty()) {
             ctx.drawCenteredTextWithShadow(textRenderer, "No items to show",
-                    this.width / 2, HEADER_H + 20, 0xFFAAAAAA);
+                    this.width / 2, headerHeight() + 20, 0xFFAAAAAA);
             return;
         }
 
-        int listTop = HEADER_H;
+        int listTop = headerHeight();
         int listBottom = this.height - FOOTER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         int end = Math.min(entries.size(), scrollOffset + visibleRows);
@@ -346,7 +385,7 @@ public class ContainerWorthScreen extends Screen {
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY,
                                  double horizontalAmount, double verticalAmount) {
-        int listTop = HEADER_H;
+        int listTop = headerHeight();
         int listBottom = this.height - FOOTER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
 
