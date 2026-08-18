@@ -469,27 +469,54 @@ public final class CraftingProfit {
         return next;
     }
 
+    /**
+     * Outputs we may craft toward:
+     * <ol>
+     *   <li>Directly sellable (shop BUYING price &gt; 0)</li>
+     *   <li>Intermediates that appear as <em>inputs</em> to a recipe producing (1)</li>
+     * </ol>
+     * Items with no buy price and that are not intermediates (e.g. Shears) stay out.
+     */
     static Set<String> usefulOutputs(
             Map<String, List<Container_reader.BestBuyOffer>> offers,
             List<Recipe> all,
             int maxDepth) {
-        Set<String> useful = ConcurrentHashMap.newKeySet();
+        // Layer 0: directly sellable outputs
+        Set<String> sellable = ConcurrentHashMap.newKeySet();
         for (Recipe r : all) {
-            if (bestUnitPrice(offers, r.output()) > 0) useful.add(r.output());
+            if (bestUnitPrice(offers, r.output()) > 0) sellable.add(r.output());
         }
+        // Also bag items that already sell (even if no recipe produces them)
+        // (caller adds via offers keys matching bag — handled by bagValue)
+
+        Set<String> useful = ConcurrentHashMap.newKeySet();
+        useful.addAll(sellable);
+
         for (int d = 0; d < maxDepth; d++) {
+            // Ingredients required by recipes whose output is already useful
             Set<String> needed = ConcurrentHashMap.newKeySet();
             for (Recipe r : all) {
                 if (!useful.contains(r.output())) continue;
                 for (Need n : r.inputs()) needed.addAll(n.anyOf());
             }
+            // A recipe is useful only if it produces something needed as an ingredient
+            // (or already sellable — already in useful)
             boolean changed = false;
             for (Recipe r : all) {
-                if (needed.contains(r.output()) && useful.add(r.output())) changed = true;
+                if (needed.contains(r.output()) && useful.add(r.output())) {
+                    changed = true;
+                }
             }
             if (!changed) break;
         }
         return useful;
+    }
+
+    /** Set true to spam the game log with craft-search decisions. */
+    public static volatile boolean DEBUG = true;
+
+    private static void dbg(String msg) {
+        if (DEBUG) System.out.println("[CraftingProfit] " + msg);
     }
 
     public static Plan optimize(
@@ -504,14 +531,59 @@ public final class CraftingProfit {
 
         List<Recipe> all = recipes();
         Set<String> useful = usefulOutputs(offers, all, maxDepth);
+
+        // Candidates: output must be useful (sellable or intermediate toward sellable)
         List<Recipe> candidates = new ArrayList<>();
         for (Recipe r : all) {
             if (useful.contains(r.output())) candidates.add(r);
         }
 
         double base = bagValue(clean, offers);
+
+        dbg("—— optimize ——");
+        dbg("bag: " + clean);
+        dbg("base sell value: " + String.format(Locale.US, "%.2f", base));
+        dbg("sellable/useful outputs: " + useful.size() + "  candidates: " + candidates.size());
+        if (useful.contains("Shears") || useful.stream().anyMatch(s -> s.equalsIgnoreCase("Shears"))) {
+            dbg("WARNING: Shears marked useful (someone buys them, or intermediate?)");
+        }
+        // Sample bag-relevant candidates (inputs intersect bag)
+        int shown = 0;
+        for (Recipe r : candidates) {
+            boolean touches = false;
+            for (Need n : r.inputs()) {
+                for (String a : n.anyOf()) {
+                    if (clean.containsKey(a) || clean.keySet().stream().anyMatch(k -> k.equalsIgnoreCase(a))) {
+                        touches = true;
+                        break;
+                    }
+                }
+                if (touches) break;
+            }
+            if (!touches) continue;
+            double outP = bestUnitPrice(offers, r.output());
+            dbg(String.format(Locale.US, "  candidate: %s → %s x%d (outPrice=%.2f)",
+                    shortId(r.id()), r.output(), r.outputCount(), outP));
+            if (++shown >= 25) {
+                dbg("  … (more candidates touching bag omitted)");
+                break;
+            }
+        }
+
         SearchBest best = new SearchBest(clean, base, List.of());
-        search(clean, offers, maxDepth, List.of(), best, candidates);
+        search(clean, offers, maxDepth, List.of(), best, candidates, useful);
+
+        // Never report a "better" plan that is not actually worth more
+        if (best.value <= base + 0.001) {
+            best.bag = clean;
+            best.value = base;
+            best.steps = List.of();
+        }
+
+        dbg(String.format(Locale.US, "result: value=%.2f (base=%.2f) steps=%s bag=%s",
+                best.value, base, best.steps, best.bag));
+        dbg("—— end optimize ——");
+
         return new Plan(best.bag, best.value, best.steps, candidates.size(), base);
     }
 
@@ -533,27 +605,51 @@ public final class CraftingProfit {
             int depthLeft,
             List<String> stepsSoFar,
             SearchBest best,
-            List<Recipe> candidates) {
+            List<Recipe> candidates,
+            Set<String> useful) {
 
         double here = bagValue(bag, offers);
         if (here > best.value + 0.001) {
             best.value = here;
             best.bag = new HashMap<>(bag);
             best.steps = List.copyOf(stepsSoFar);
+            if (DEBUG && !stepsSoFar.isEmpty()) {
+                dbg(String.format(Locale.US, "  new best %.2f via %s", here, stepsSoFar));
+            }
         }
         if (depthLeft <= 0) return;
 
         for (Recipe recipe : candidates) {
+            // Skip dead-end products: output not sellable and not an intermediate we still need
+            if (!useful.contains(recipe.output())) continue;
+
             int max = maxCrafts(recipe, bag);
             if (max <= 0) continue;
+
+            // Try full batch only (greedy). Skip if this craft alone would
+            // destroy all sellable value with no priced output (quick reject).
             Map<String, Integer> next = applyCraft(recipe, bag, max);
             if (next.equals(bag)) continue;
+
+            double nextVal = bagValue(next, offers);
+            double outPrice = bestUnitPrice(offers, recipe.output());
+            // If output itself is not sellable, only keep exploring if we still
+            // have depth to craft it further into something sellable.
+            if (outPrice <= 0 && depthLeft <= 1) {
+                // Last step cannot be an unpriced intermediate
+                continue;
+            }
+            // Optional prune: if value already far below best and output unpriced, skip
+            if (outPrice <= 0 && nextVal < best.value * 0.5 && nextVal < here) {
+                continue;
+            }
+
             String step = String.format(Locale.US, "%dx %s → %s",
                     max, shortId(recipe.id()), recipe.output());
             if (stepsSoFar.contains(step)) continue;
             List<String> nextSteps = new ArrayList<>(stepsSoFar);
             nextSteps.add(step);
-            search(next, offers, depthLeft - 1, nextSteps, best, candidates);
+            search(next, offers, depthLeft - 1, nextSteps, best, candidates, useful);
         }
     }
 
