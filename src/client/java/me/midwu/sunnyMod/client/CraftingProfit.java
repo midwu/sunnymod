@@ -411,25 +411,76 @@ public final class CraftingProfit {
 
     // ── Pricing / apply ──────────────────────────────────────────────────────
 
-    static double bestUnitPrice(Map<String, List<Container_reader.BestBuyOffer>> offers, String name) {
-        if (name == null) return -1;
+    static List<Container_reader.BestBuyOffer> offersFor(
+            Map<String, List<Container_reader.BestBuyOffer>> offers, String name) {
+        if (name == null) return List.of();
         List<Container_reader.BestBuyOffer> list = offers.get(name);
-        if (list != null && !list.isEmpty()) return list.getFirst().price;
+        if (list != null && !list.isEmpty()) return list;
         for (var e : offers.entrySet()) {
             if (e.getKey().equalsIgnoreCase(name) && !e.getValue().isEmpty()) {
-                return e.getValue().getFirst().price;
+                return e.getValue();
             }
         }
-        return -1;
+        return List.of();
     }
 
+    static double bestUnitPrice(Map<String, List<Container_reader.BestBuyOffer>> offers, String name) {
+        List<Container_reader.BestBuyOffer> list = offersFor(offers, name);
+        return list.isEmpty() ? -1 : list.getFirst().price;
+    }
+
+    /**
+     * Total BUYING capacity for an item across all shops.
+     * {@code -1} = at least one shop has unknown space (treat as unlimited).
+     */
+    static int totalBuySpace(Map<String, List<Container_reader.BestBuyOffer>> offers, String name) {
+        List<Container_reader.BestBuyOffer> list = offersFor(offers, name);
+        if (list.isEmpty()) return 0;
+        int sum = 0;
+        boolean anyUnknown = false;
+        for (var o : list) {
+            int sp = Container_reader.parseShopSpace(o.stockSpace);
+            if (sp < 0) anyUnknown = true;
+            else sum += sp;
+        }
+        if (anyUnknown) return -1; // unlimited / unknown
+        return sum;
+    }
+
+    /**
+     * Sell value of {@code count} items respecting each shop's buy-space
+     * (same cascade idea as F7 allocation). Units past total capacity are worth $0.
+     */
+    static double valueWithCapacity(
+            String name, int count,
+            Map<String, List<Container_reader.BestBuyOffer>> offers) {
+        if (count <= 0) return 0;
+        List<Container_reader.BestBuyOffer> list = offersFor(offers, name);
+        if (list.isEmpty()) return 0;
+
+        double value = 0;
+        int remaining = count;
+        for (var offer : list) {
+            if (remaining <= 0) break;
+            int space = Container_reader.parseShopSpace(offer.stockSpace);
+            int take;
+            if (space < 0) take = remaining;           // unknown → can take all
+            else if (space == 0) continue;             // full
+            else take = Math.min(remaining, space);
+            if (take <= 0) continue;
+            value += offer.price * take;
+            remaining -= take;
+        }
+        return value;
+    }
+
+    /** Capacity-aware bag total (matches F7 sell reality much more closely). */
     static double bagValue(Map<String, Integer> bag,
                            Map<String, List<Container_reader.BestBuyOffer>> offers) {
         double v = 0;
         for (var e : bag.entrySet()) {
             if (e.getValue() <= 0) continue;
-            double p = bestUnitPrice(offers, e.getKey());
-            if (p > 0) v += p * e.getValue();
+            v += valueWithCapacity(e.getKey(), e.getValue(), offers);
         }
         return v;
     }
@@ -585,6 +636,20 @@ public final class CraftingProfit {
 
         dbg(String.format(Locale.US, "result: value=%.2f (base=%.2f) steps=%s bag=%s",
                 best.value, base, best.steps, best.bag));
+        if (!best.bag.isEmpty()) {
+            for (var e : best.bag.entrySet()) {
+                int space = totalBuySpace(offers, e.getKey());
+                double full = bestUnitPrice(offers, e.getKey());
+                double capped = valueWithCapacity(e.getKey(), e.getValue(), offers);
+                if (full > 0 && e.getValue() > 0) {
+                    dbg(String.format(Locale.US,
+                            "  sell %s x%d: space=%s  uncapped=$%.0f  capped=$%.0f",
+                            e.getKey(), e.getValue(),
+                            space < 0 ? "unknown" : String.format(Locale.US, "%,d", space),
+                            full * e.getValue(), capped));
+                }
+            }
+        }
         dbg("—— end optimize ——");
 
         return new Plan(best.bag, best.value, best.steps, candidates.size(), base);
