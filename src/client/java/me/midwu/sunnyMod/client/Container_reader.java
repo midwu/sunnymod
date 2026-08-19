@@ -68,6 +68,7 @@ public class Container_reader implements ClientModInitializer {
     // its mouse button).
     private static boolean wasF5Down = false;
     private static boolean wasF7Down = false;
+    private static boolean wasF8Down = false;
 
     // Cache for the F7 valuation lookup, keyed off shop_data.csv's
     // last-modified time so repeated F7 presses in the same session don't
@@ -224,6 +225,30 @@ public class Container_reader implements ClientModInitializer {
                 }
             }
             wasF7Down = isF7Down;
+
+            // F8 — in-game profit finder (shop-to-shop flips from shop_data.csv)
+            boolean isF8Down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F8) == GLFW.GLFW_PRESS;
+            if (isF8Down && !wasF8Down) {
+                if (!(client.currentScreen instanceof ProfitScreen)) {
+                    if (ProfitScreen.mode == ProfitScreen.Mode.IGNORE) {
+                        if (client.player != null) {
+                            client.player.sendMessage(Text.literal(
+                                    "§a[F8] §7Ignore lists — edit Players / Warps / Items"), false);
+                        }
+                        client.setScreen(new ProfitScreen(
+                                new ProfitFinder.Result(java.util.List.of(), 0, 0, 0, "ignore mode", false)));
+                    } else {
+                        ProfitFinder.Result r = ProfitScreen.runFind();
+                        if (client.player != null) {
+                            String tag = ProfitScreen.mode == ProfitScreen.Mode.SELF ? "self-flips" : "flips";
+                            client.player.sendMessage(Text.literal(
+                                    "§a[F8] §f" + r.trades.size() + " §7" + tag + " · " + r.loadSummary), false);
+                        }
+                        client.setScreen(new ProfitScreen(r));
+                    }
+                }
+            }
+            wasF8Down = isF8Down;
         });
     }
 

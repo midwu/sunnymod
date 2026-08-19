@@ -707,8 +707,10 @@ public final class CraftingProfit {
                 double nextVal = bagValue(next, offers);
                 double outPrice = bestUnitPrice(offers, recipe.output());
 
-                // Terminal (priced) craft must not lose money this step
-                if (outPrice > 0 && nextVal < here - 0.001) continue;
+                // Last step must not reduce sellable value. Intermediate steps MAY
+                // dip (e.g. 9 nuggets @$1 → 1 ingot @$7.50) when depth remains to
+                // recover via a higher-value craft (iron_chain, etc.).
+                if (outPrice > 0 && nextVal < here - 0.001 && depthLeft <= 1) continue;
 
                 // Unpriced intermediate: only with depth left to turn into something sellable
                 if (outPrice <= 0 && depthLeft <= 1) continue;
