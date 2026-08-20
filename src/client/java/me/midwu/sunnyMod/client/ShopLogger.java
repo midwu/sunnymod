@@ -67,6 +67,8 @@ public class ShopLogger implements ClientModInitializer {
         String action;
         String status;
         String timestamp;
+        /** Consecutive re-scans in a row with no visible change. Resets to 0 on any change. */
+        int noChangeStreak;
 
         public String toCsvLine() {
             String priceStr = (price == (int) price) ? String.valueOf((int) price) : String.valueOf(price);
@@ -78,7 +80,8 @@ public class ShopLogger implements ClientModInitializer {
                     action + "," +
                     status + "," +
                     timestamp + "," +
-                    escapeCsv(currentWarp);
+                    escapeCsv(currentWarp) + "," +
+                    noChangeStreak;
         }
 
         private String escapeCsv(String value) {
@@ -150,6 +153,8 @@ public class ShopLogger implements ClientModInitializer {
             newData.timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
 
             ShopData oldData = findExistingShop(newData.shopLocation);
+            newData.noChangeStreak = (oldData == null) ? 0
+                    : (computeChanges(oldData, newData).isEmpty() ? oldData.noChangeStreak + 1 : 0);
             saveShopData(newData, oldData);
 
             lastWarpActionTime = System.currentTimeMillis();
@@ -172,6 +177,8 @@ public class ShopLogger implements ClientModInitializer {
                     data.price = parseDoubleSafely(parts[4], 0.0);
                     data.action = parts[5];
                     data.status = parts[6];
+                    data.timestamp = parts.length > 7 ? parts[7] : "";
+                    data.noChangeStreak = parts.length > 9 ? parseIntSafely(parts[9], 0) : 0;
                     return data;
                 }
             }
@@ -182,7 +189,7 @@ public class ShopLogger implements ClientModInitializer {
     private void saveShopData(ShopData newData, ShopData oldData) {
         boolean isUpdate = oldData != null;
         List<String> lines = new ArrayList<>();
-        String header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp";
+        String header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp,NoChangeStreak";
 
         if (Files.exists(CSV_FILE)) {
             try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {
@@ -268,6 +275,18 @@ public class ShopLogger implements ClientModInitializer {
         }
 
         client.player.sendMessage(Text.literal(msg.toString()), false);
+    }
+
+    /** Fields that differ between two scans of the same sign. Empty = nothing changed (a "no-op" rescan). */
+    private List<String> computeChanges(ShopData oldData, ShopData newData) {
+        List<String> changes = new ArrayList<>();
+        if (!oldData.item.equals(newData.item)) changes.add("item");
+        if (Math.abs(oldData.price - newData.price) > 0.01) changes.add("price");
+        if (oldData.stockSpace != newData.stockSpace) changes.add("stock");
+        if (!oldData.shopOwner.equals(newData.shopOwner)) changes.add("owner");
+        if (!oldData.action.equals(newData.action)) changes.add("action");
+        if (!oldData.status.equals(newData.status)) changes.add("status");
+        return changes;
     }
 
     private ShopData parseShopMessage(String message) {

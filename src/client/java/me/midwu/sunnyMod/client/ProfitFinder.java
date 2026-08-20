@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -111,6 +112,65 @@ public final class ProfitFinder {
         }
     }
 
+    /** A non-Active (out of stock / out of space) listing worth re-visiting, ranked by estimated payoff. */
+    public static final class WarpPriority {
+        public final String warp;
+        public final String item;
+        public final String owner;
+        public final String action;      // SELLING / BUYING
+        public final String status;      // "out of stock" / "out of space"
+        public final double lastPrice;
+        public final double potentialValue; // best-known $/item edge if restocked right now (0 if no current match)
+        public final double ageHours;       // hours since last scan of this shop
+        public final int noChangeStreak;    // consecutive rescans that found nothing different
+
+        WarpPriority(String warp, String item, String owner, String action, String status,
+                     double lastPrice, double potentialValue, double ageHours, int noChangeStreak) {
+            this.warp = warp != null ? warp : "";
+            this.item = item;
+            this.owner = owner;
+            this.action = action;
+            this.status = status;
+            this.lastPrice = lastPrice;
+            this.potentialValue = potentialValue;
+            this.ageHours = ageHours;
+            this.noChangeStreak = noChangeStreak;
+        }
+
+        /** Higher = more worth re-visiting. Staleness raises it, repeated no-change rescans fade it out. */
+        public double priority() {
+            double ageWeight = 1.0 + Math.min(ageHours / 6.0, 4.0); // stale data matters more, caps at 5x
+            double decay = 1.0 / (1.0 + noChangeStreak * 0.5);      // repeated "still empty" fades it out
+            double base = Math.max(potentialValue, 0.01);           // small floor so pure staleness still ranks
+            return base * ageWeight * decay;
+        }
+    }
+
+    /** All the stale listings at one warp, rolled into a single re-visit-worth score. */
+    public static final class WarpSummary {
+        public final String warp;
+        public final List<WarpPriority> items;
+        public final double totalPotentialValue; // sum of potentialValue across every stale item here
+        public final double maxAgeHours;          // oldest scan among this warp's stale items
+        public final int maxNoChangeStreak;        // worst (highest) streak among this warp's stale items
+
+        WarpSummary(String warp, List<WarpPriority> items, double totalPotentialValue,
+                    double maxAgeHours, int maxNoChangeStreak) {
+            this.warp = warp != null ? warp : "";
+            this.items = items;
+            this.totalPotentialValue = totalPotentialValue;
+            this.maxAgeHours = maxAgeHours;
+            this.maxNoChangeStreak = maxNoChangeStreak;
+        }
+
+        public double priority() {
+            double ageWeight = 1.0 + Math.min(maxAgeHours / 6.0, 4.0);
+            double decay = 1.0 / (1.0 + maxNoChangeStreak * 0.5);
+            double base = Math.max(totalPotentialValue, 0.01);
+            return base * ageWeight * decay;
+        }
+    }
+
     private static final class Listing {
         final String item;
         final String owner;
@@ -201,6 +261,132 @@ public final class ProfitFinder {
 
     public static Result findSelfFlips(double minProfitPerItem, int limit, double maxAgeHours) {
         return findInternal(true, minProfitPerItem, 0, limit, maxAgeHours);
+    }
+
+    /**
+     * Shops sitting at "out of stock" / "out of space" — invisible to findFlips/findSelfFlips —
+     * ranked by how worth re-visiting they are: estimated payoff if restocked, weighted by
+     * staleness, and faded out the more times in a row a rescan has found nothing new.
+     *
+     * @param hideRecentlyScanned skip shops rescanned in the last 15 minutes (just checked, no point yet)
+     */
+    public static List<WarpPriority> findUpdatePriorities(boolean hideRecentlyScanned) {
+        List<WarpPriority> out = new ArrayList<>();
+        if (!Files.exists(SHOP_DATA)) return out;
+
+        Set<String> ignoreItems = loadIgnore(IgnoreKind.ITEMS);
+        Set<String> ignoreOwners = loadIgnore(IgnoreKind.PLAYERS);
+        Set<String> ignoreWarps = loadIgnore(IgnoreKind.WARPS);
+
+        List<Listing> activeSellers = new ArrayList<>();
+        List<Listing> activeBuyers = new ArrayList<>();
+        List<Object[]> stale = new ArrayList<>(); // [warp, item, owner, action, status, price, epochMs, noChangeStreak]
+
+        try (BufferedReader br = Files.newBufferedReader(SHOP_DATA)) {
+            String header = br.readLine();
+            if (header == null) return out;
+            String line;
+            int nextId = 0;
+            while ((line = br.readLine()) != null) {
+                if (line.isBlank()) continue;
+                String[] p = parseCsvLine(line);
+                if (p.length < 7) continue;
+
+                String owner = p[1].trim();
+                String item = strip(p[2]);
+                String action = p[5].trim();
+                String status = p[6].trim();
+                String timestamp = p.length > 7 ? p[7].trim() : "";
+                String warp = p.length > 8 ? p[8].trim() : "";
+                int noChangeStreak = p.length > 9 ? parseIntSafe(p[9].trim(), 0) : 0;
+
+                if (item.isEmpty()) continue;
+                if (containsIgnore(ignoreItems, item) || containsIgnore(ignoreOwners, owner)
+                        || containsIgnore(ignoreWarps, warp)) continue;
+
+                double price;
+                try {
+                    price = Double.parseDouble(p[4].replace(",", "").replace("$", "").trim());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                if (price < 0) continue;
+
+                long epochMs = parseTimestampMs(timestamp);
+
+                if ("Active".equalsIgnoreCase(status)) {
+                    Listing L = new Listing(item, owner, warp, "", price, 1, nextId++, epochMs);
+                    if ("SELLING".equalsIgnoreCase(action)) activeSellers.add(L);
+                    else if ("BUYING".equalsIgnoreCase(action)) activeBuyers.add(L);
+                } else if ("out of stock".equalsIgnoreCase(status) || "out of space".equalsIgnoreCase(status)) {
+                    stale.add(new Object[]{warp, item, owner, action, status, price, epochMs, noChangeStreak});
+                }
+            }
+        } catch (Exception e) {
+            return out;
+        }
+
+        long now = System.currentTimeMillis();
+        for (Object[] s : stale) {
+            String warp = (String) s[0];
+            String item = (String) s[1];
+            String owner = (String) s[2];
+            String action = (String) s[3];
+            String status = (String) s[4];
+            double price = (double) s[5];
+            long epochMs = (long) s[6];
+            int noChangeStreak = (int) s[7];
+
+            double ageHours = epochMs > 0 ? (now - epochMs) / 3_600_000.0 : 9_999;
+            if (hideRecentlyScanned && ageHours < 0.25) continue;
+
+            double bestEdge = 0;
+            if ("SELLING".equalsIgnoreCase(action)) {
+                for (Listing b : activeBuyers) {
+                    if (b.item.equalsIgnoreCase(item)) bestEdge = Math.max(bestEdge, b.price - price);
+                }
+            } else if ("BUYING".equalsIgnoreCase(action)) {
+                for (Listing sel : activeSellers) {
+                    if (sel.item.equalsIgnoreCase(item)) bestEdge = Math.max(bestEdge, price - sel.price);
+                }
+            }
+            if (bestEdge < 0) bestEdge = 0;
+
+            out.add(new WarpPriority(warp, item, owner, action, status, price, bestEdge, ageHours, noChangeStreak));
+        }
+
+        out.sort(Comparator.comparingDouble(WarpPriority::priority).reversed());
+        return out;
+    }
+
+    /**
+     * Same data as {@link #findUpdatePriorities}, rolled up so each warp appears once —
+     * total potential value across every stale item there, oldest scan age, worst streak.
+     */
+    public static List<WarpSummary> findUpdatePrioritiesByWarp(boolean hideRecentlyScanned) {
+        List<WarpPriority> raw = findUpdatePriorities(hideRecentlyScanned);
+
+        Map<String, List<WarpPriority>> byWarp = new LinkedHashMap<>();
+        for (WarpPriority p : raw) {
+            byWarp.computeIfAbsent(p.warp, k -> new ArrayList<>()).add(p);
+        }
+
+        List<WarpSummary> out = new ArrayList<>();
+        for (Map.Entry<String, List<WarpPriority>> e : byWarp.entrySet()) {
+            List<WarpPriority> items = e.getValue();
+            double total = 0;
+            double maxAge = 0;
+            int maxStreak = 0;
+            for (WarpPriority p : items) {
+                total += p.potentialValue;
+                maxAge = Math.max(maxAge, p.ageHours);
+                maxStreak = Math.max(maxStreak, p.noChangeStreak);
+            }
+            out.add(new WarpSummary(e.getKey(), items, total, maxAge, maxStreak));
+        }
+
+        out.sort(Comparator.comparingDouble(WarpSummary::priority).reversed());
+        return out;
     }
 
     private static Result findInternal(boolean selfFlip, double minProfitPerItem,
@@ -421,6 +607,10 @@ public final class ProfitFinder {
     private static String strip(String s) {
         if (s == null) return "";
         return s.replaceAll("§.", "").trim();
+    }
+
+    private static int parseIntSafe(String s, int def) {
+        try { return Integer.parseInt(s.replace(",", "").trim()); } catch (Exception e) { return def; }
     }
 
     static String[] parseCsvLine(String line) {
