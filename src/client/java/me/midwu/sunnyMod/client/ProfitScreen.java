@@ -8,23 +8,56 @@ import net.minecraft.client.gui.widget.ButtonWidget;
 import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.input.KeyInput;
 import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/**
- * F8 profit finder UI.
- * Top modes: Flips | Self-flip | Ignore lists
- * Ignore sub-tabs: Players | Warps | Items
- */
 public class ProfitScreen extends Screen {
 
-    private static final int ROW_HEIGHT = 22;
-    private static final int HEADER_H = 56;
-    private static final int FOOTER_H = 28;
-    private static final int PAD = 12;
+    // --- CONFIGURABLE LAYOUT VARIABLES ---
+
+    // Row and section heights
+    private static final int ROW_HEIGHT = 22;       // Height of each row in the table
+    private static final int HEADER_H = 56;         // Height of the header section
+    private static final int FOOTER_H = 28;         // Height of the footer section
+    private static final int PAD = 12;              // Padding from the edges
+
+    // --- FLIPS PAGE VARIABLES ---
+    private static final int FLIPS_ITEM_COL_WIDTH = 60;   // Width of the Item column in Flips mode
+    private static final int FLIPS_PROFIT_COL_WIDTH = 140;  // Width of the Profit column in Flips mode
+    private static final int FLIPS_WARPS_COL_WIDTH = 210; // Width of the Warps column in Flips mode
+    private static final int FLIPS_WARP_BTN_W = 140;      // Width of warp buttons in Flips mode
+    private static final int FLIPS_ITEM_NAME_MAX_CHARS = 12;    // Max characters for item names in Flips mode
+    private static final int FLIPS_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Flips mode
+
+    // --- SELF-FLIP PAGE VARIABLES ---
+    private static final int SELF_ITEM_COL_WIDTH = 200;   // Width of the Item column in Self-Flip mode
+    private static final int SELF_OWNER_COL_WIDTH = 280; // Width of the Owner column in Self-Flip mode
+    private static final int SELF_PROFIT_COL_WIDTH = 240;  // Width of the Margin column in Self-Flip mode
+    private static final int SELF_WARP_BTN_W = 180;      // Width of warp button in Self-Flip mode
+    private static final int SELF_ITEM_NAME_MAX_CHARS = 24;    // Max characters for item names in Self-Flip mode
+    private static final int SELF_OWNER_NAME_MAX_CHARS = 40;   // Max characters for owner names in Self-Flip mode
+    private static final int SELF_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Self-Flip mode
+
+    // --- UPDATE PAGE VARIABLES ---
+    private static final int UPDATE_WARP_COL_WIDTH = 140;  // Width of the Warp column in Update mode
+    private static final int UPDATE_ITEMS_COL_WIDTH = 120;  // Width of the Items column in Update mode
+    private static final int UPDATE_EDGE_COL_WIDTH = 140;  // Width of the Total Edge column in Update mode
+    private static final int UPDATE_AGE_COL_WIDTH = 120;   // Width of the Age column in Update mode
+    private static final int UPDATE_WARP_BTN_W = 180;      // Width of warp button in Update mode
+    private static final int UPDATE_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Update mode
+
+    // --- IGNORE TAB VARIABLES ---
+    private static final int IGNORE_TEXT_VERTICAL_SPACING = 12; // Vertical spacing between text lines in Ignore tab
+    private static final int IGNORE_COL_WIDTH = 120; // Width for each column in Ignore tab
+    private static final int IGNORE_COL_1_X = PAD; // X position for first column (Items)
+    private static final int IGNORE_COL_2_X = PAD + IGNORE_COL_WIDTH + 20; // X position for second column (Players)
+    private static final int IGNORE_COL_3_X = PAD + (IGNORE_COL_WIDTH * 2) + 40; // X position for third column (Warps)
+
+    // --- END CONFIGURABLE VARIABLES ---
 
     public enum Mode {
         FLIPS("Flips"),
@@ -36,20 +69,22 @@ public class ProfitScreen extends Screen {
         Mode(String label) { this.label = label; }
     }
 
-    /** Default OFF — matches Python max-age unset. */
     static boolean ageFilterEnabled = false;
     static double ageFilterHours = 24.0;
     static Mode mode = Mode.FLIPS;
-    static ProfitFinder.IgnoreKind ignoreKind = ProfitFinder.IgnoreKind.PLAYERS;
-
-    /** Skip warps rescanned in the last 15 min in the Update tab — you just checked, nothing to gain yet. */
+    static ProfitFinder.IgnoreKind ignoreKind = ProfitFinder.IgnoreKind.ITEMS; // Default to Items
     static boolean hideRecentlyScanned = true;
 
     private ProfitFinder.Result result;
-    private List<String> ignoreEntries = List.of();
+    private List<String> ignoreItems = List.of();
+    private List<String> ignorePlayers = List.of();
+    private List<String> ignoreWarps = List.of();
     private List<ProfitFinder.WarpSummary> updatePriorities = List.of();
     private int scrollOffset = 0;
     private int maxScroll = 0;
+    private int itemsScrollOffset = 0;
+    private int playersScrollOffset = 0;
+    private int warpsScrollOffset = 0;
     private TextFieldWidget addField;
 
     public ProfitScreen(ProfitFinder.Result result) {
@@ -73,9 +108,13 @@ public class ProfitScreen extends Screen {
     }
 
     private void reloadIgnoreEntries() {
-        Set<String> set = ProfitFinder.loadIgnore(ignoreKind);
-        ignoreEntries = new ArrayList<>(set);
+        ignoreItems = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.ITEMS));
+        ignorePlayers = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.PLAYERS));
+        ignoreWarps = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.WARPS));
         scrollOffset = 0;
+        itemsScrollOffset = 0;
+        playersScrollOffset = 0;
+        warpsScrollOffset = 0;
     }
 
     private void reloadUpdatePriorities() {
@@ -99,7 +138,6 @@ public class ProfitScreen extends Screen {
 
     @Override
     protected void init() {
-        // Mode buttons — top left
         int bx = PAD;
         int bw = 72;
         for (Mode m : Mode.values()) {
@@ -114,32 +152,42 @@ public class ProfitScreen extends Screen {
         }
 
         if (mode == Mode.IGNORE) {
-            // Sub-tabs: Players / Warps / Items
-            int sx = PAD;
-            for (ProfitFinder.IgnoreKind k : ProfitFinder.IgnoreKind.values()) {
-                ProfitFinder.IgnoreKind captured = k;
-                boolean on = ignoreKind == k;
-                addDrawableChild(ButtonWidget.builder(
-                        Text.literal(on ? "[" + k.label + "]" : k.label),
-                        b -> {
-                            ignoreKind = captured;
-                            reloadIgnoreEntries();
-                            if (client != null) client.setScreen(new ProfitScreen(result));
-                        }
-                ).dimensions(sx, 28, 64, 16).build());
-                sx += 68;
-            }
+            // Add column selection buttons at the bottom
+            int buttonY = this.height - FOOTER_H + 4;
 
-            addField = new TextFieldWidget(textRenderer, PAD, this.height - 24, 160, 16,
+            addDrawableChild(ButtonWidget.builder(
+                            Text.literal(ignoreKind == ProfitFinder.IgnoreKind.ITEMS ? "[Items]" : "Items"),
+                            b -> {
+                                ignoreKind = ProfitFinder.IgnoreKind.ITEMS;
+                            })
+                    .dimensions(PAD, buttonY, 70, 16)
+                    .build());
+
+            addDrawableChild(ButtonWidget.builder(
+                            Text.literal(ignoreKind == ProfitFinder.IgnoreKind.PLAYERS ? "[Players]" : "Players"),
+                            b -> {
+                                ignoreKind = ProfitFinder.IgnoreKind.PLAYERS;
+                            })
+                    .dimensions(PAD + 80, buttonY, 70, 16)
+                    .build());
+
+            addDrawableChild(ButtonWidget.builder(
+                            Text.literal(ignoreKind == ProfitFinder.IgnoreKind.WARPS ? "[Warps]" : "Warps"),
+                            b -> {
+                                ignoreKind = ProfitFinder.IgnoreKind.WARPS;
+                            })
+                    .dimensions(PAD + 160, buttonY, 70, 16)
+                    .build());
+
+            addField = new TextFieldWidget(textRenderer, PAD + 240, this.height - FOOTER_H + 4, 160, 16,
                     Text.literal("Add entry"));
             addField.setMaxLength(64);
             addField.setPlaceholder(Text.literal("Type name, Enter to add"));
             addDrawableChild(addField);
 
             addDrawableChild(ButtonWidget.builder(Text.literal("Add"), b -> tryAddIgnore())
-                    .dimensions(PAD + 166, this.height - 24, 40, 16).build());
+                    .dimensions(PAD + 406, this.height - FOOTER_H + 4, 40, 16).build());
         } else if (mode == Mode.UPDATE) {
-            // Hide-recently-scanned toggle + refresh for the update-priority tab
             String label = hideRecentlyScanned ? "Hide <15m: On" : "Hide <15m: Off";
             addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> {
                         hideRecentlyScanned = !hideRecentlyScanned;
@@ -153,7 +201,6 @@ public class ProfitScreen extends Screen {
                 if (client != null) client.setScreen(new ProfitScreen(result));
             }).dimensions(this.width - PAD - 80, 6, 70, 18).build());
         } else {
-            // Age toggle + refresh for flip modes
             String ageLabel = ageFilterEnabled
                     ? String.format(Locale.US, "Age ≤%.0fh", ageFilterHours)
                     : "Age: off";
@@ -178,7 +225,7 @@ public class ProfitScreen extends Screen {
         int listTop = HEADER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         int size = switch (mode) {
-            case IGNORE -> ignoreEntries.size();
+            case IGNORE -> Math.max(ignoreItems.size(), Math.max(ignorePlayers.size(), ignoreWarps.size()));
             case UPDATE -> updatePriorities.size();
             default -> result.trades.size();
         };
@@ -189,6 +236,8 @@ public class ProfitScreen extends Screen {
         if (addField == null) return;
         String v = addField.getText();
         if (v == null || v.isBlank()) return;
+
+        // Add to the currently selected ignore kind
         if (ProfitFinder.addIgnore(ignoreKind, v.trim())) {
             addField.setText("");
             reloadIgnoreEntries();
@@ -208,6 +257,34 @@ public class ProfitScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double horizontal, double vertical) {
+        if (mode == Mode.IGNORE) {
+            // Handle scrolling for each column separately
+            int listTop = HEADER_H + 8;
+            int listBottom = this.height - FOOTER_H - 4;
+
+            // Check if mouse is over Items column
+            if (mouseX >= IGNORE_COL_1_X && mouseX < IGNORE_COL_1_X + IGNORE_COL_WIDTH) {
+                int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+                if (vertical > 0) itemsScrollOffset = Math.max(0, itemsScrollOffset - 1);
+                else if (vertical < 0) itemsScrollOffset = Math.min(Math.max(0, ignoreItems.size() - visibleRows), itemsScrollOffset + 1);
+                return true;
+            }
+            // Check if mouse is over Players column
+            else if (mouseX >= IGNORE_COL_2_X && mouseX < IGNORE_COL_2_X + IGNORE_COL_WIDTH) {
+                int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+                if (vertical > 0) playersScrollOffset = Math.max(0, playersScrollOffset - 1);
+                else if (vertical < 0) playersScrollOffset = Math.min(Math.max(0, ignorePlayers.size() - visibleRows), playersScrollOffset + 1);
+                return true;
+            }
+            // Check if mouse is over Warps column
+            else if (mouseX >= IGNORE_COL_3_X && mouseX < IGNORE_COL_3_X + IGNORE_COL_WIDTH) {
+                int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+                if (vertical > 0) warpsScrollOffset = Math.max(0, warpsScrollOffset - 1);
+                else if (vertical < 0) warpsScrollOffset = Math.min(Math.max(0, ignoreWarps.size() - visibleRows), warpsScrollOffset + 1);
+                return true;
+            }
+        }
+
         if (vertical > 0) scrollOffset = Math.max(0, scrollOffset - 1);
         else if (vertical < 0) scrollOffset = Math.min(maxScroll, scrollOffset + 1);
         return true;
@@ -217,24 +294,64 @@ public class ProfitScreen extends Screen {
     public boolean mouseClicked(Click click, boolean doubled) {
         double mouseX = click.x();
         double mouseY = click.y();
+
         if (mode == Mode.IGNORE && click.button() == 0) {
-            int listTop = HEADER_H;
-            int listBottom = this.height - FOOTER_H;
+            int listTop = HEADER_H + 8;
+            int listBottom = this.height - FOOTER_H - 4;
             int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+
+            // Check Items column
             for (int i = 0; i < visibleRows; i++) {
-                int idx = scrollOffset + i;
-                if (idx >= ignoreEntries.size()) break;
+                int idx = itemsScrollOffset + i;
+                if (idx >= ignoreItems.size()) break;
                 int rowY = listTop + i * ROW_HEIGHT;
                 if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
-                        && mouseX >= this.width - PAD - 70 && mouseX < this.width - PAD) {
-                    String entry = ignoreEntries.get(idx);
-                    ProfitFinder.removeIgnore(ignoreKind, entry);
-                    reloadIgnoreEntries();
-                    if (client != null) client.setScreen(new ProfitScreen(result));
+                        && mouseX >= IGNORE_COL_1_X && mouseX < IGNORE_COL_1_X + IGNORE_COL_WIDTH) {
+                    if (mouseX >= IGNORE_COL_1_X + IGNORE_COL_WIDTH - 50) {
+                        String entry = ignoreItems.get(idx);
+                        ProfitFinder.removeIgnore(ProfitFinder.IgnoreKind.ITEMS, entry);
+                        reloadIgnoreEntries();
+                        if (client != null) client.setScreen(new ProfitScreen(result));
+                    }
+                    return true;
+                }
+            }
+
+            // Check Players column
+            for (int i = 0; i < visibleRows; i++) {
+                int idx = playersScrollOffset + i;
+                if (idx >= ignorePlayers.size()) break;
+                int rowY = listTop + i * ROW_HEIGHT;
+                if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                        && mouseX >= IGNORE_COL_2_X && mouseX < IGNORE_COL_2_X + IGNORE_COL_WIDTH) {
+                    if (mouseX >= IGNORE_COL_2_X + IGNORE_COL_WIDTH - 50) {
+                        String entry = ignorePlayers.get(idx);
+                        ProfitFinder.removeIgnore(ProfitFinder.IgnoreKind.PLAYERS, entry);
+                        reloadIgnoreEntries();
+                        if (client != null) client.setScreen(new ProfitScreen(result));
+                    }
+                    return true;
+                }
+            }
+
+            // Check Warps column
+            for (int i = 0; i < visibleRows; i++) {
+                int idx = warpsScrollOffset + i;
+                if (idx >= ignoreWarps.size()) break;
+                int rowY = listTop + i * ROW_HEIGHT;
+                if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                        && mouseX >= IGNORE_COL_3_X && mouseX < IGNORE_COL_3_X + IGNORE_COL_WIDTH) {
+                    if (mouseX >= IGNORE_COL_3_X + IGNORE_COL_WIDTH - 50) {
+                        String entry = ignoreWarps.get(idx);
+                        ProfitFinder.removeIgnore(ProfitFinder.IgnoreKind.WARPS, entry);
+                        reloadIgnoreEntries();
+                        if (client != null) client.setScreen(new ProfitScreen(result));
+                    }
                     return true;
                 }
             }
         }
+
         if (mode == Mode.UPDATE && click.button() == 0) {
             int listTop = HEADER_H + 4;
             int listBottom = this.height - FOOTER_H;
@@ -254,7 +371,6 @@ public class ProfitScreen extends Screen {
         return super.mouseClicked(click, doubled);
     }
 
-    /** Re-issues a saved warp/spawn command string (e.g. "/warp foo") exactly as it was recorded. */
     private void runWarpCommand(String warp) {
         if (warp == null || warp.isBlank() || client == null || client.player == null) return;
         String cmd = warp.startsWith("/") ? warp.substring(1) : warp;
@@ -288,10 +404,9 @@ public class ProfitScreen extends Screen {
                     result.trades.isEmpty() ? 0 : result.trades.getFirst().profitPerItem);
         } else {
             money = String.format(Locale.US,
-                    "Σ profit $%,.0f  ·  capital $%,.0f  ·  %d shown",
+                    "Σ profit $%,.0f  ·  capital $%,.0f  ·  \n%d shown",
                     result.totalProfit, result.totalCapital, result.trades.size());
         }
-        // drawn in header area — secondary line already used; put under columns
         int listTop = HEADER_H + 4;
         int listBottom = this.height - FOOTER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
@@ -301,18 +416,23 @@ public class ProfitScreen extends Screen {
         ctx.drawText(textRenderer, money, PAD, listTop - 12, 0xFF88FF88, false);
 
         int hy = listTop;
+
+        // Use Flips page variables for Flips mode, Self-Flip variables for Self-Flip mode
+        int itemColWidth = (mode == Mode.SELF) ? SELF_ITEM_COL_WIDTH : FLIPS_ITEM_COL_WIDTH;
+        int ownerColWidth = (mode == Mode.SELF) ? SELF_OWNER_COL_WIDTH : 0;
+        int profitColWidth = (mode == Mode.SELF) ? SELF_PROFIT_COL_WIDTH : FLIPS_PROFIT_COL_WIDTH;
+        int warpsColWidth = (mode == Mode.SELF) ? 0 : FLIPS_WARPS_COL_WIDTH;
+        int warpBtnW = (mode == Mode.SELF) ? SELF_WARP_BTN_W : FLIPS_WARP_BTN_W;
+        int itemNameMaxChars = (mode == Mode.SELF) ? SELF_ITEM_NAME_MAX_CHARS : FLIPS_ITEM_NAME_MAX_CHARS;
+        int warpNameMaxChars = (mode == Mode.SELF) ? SELF_WARP_NAME_MAX_CHARS : FLIPS_WARP_NAME_MAX_CHARS;
+
         ctx.drawText(textRenderer, "Item", PAD, hy, 0xFF666666, false);
         if (mode == Mode.SELF) {
-            ctx.drawText(textRenderer, "Owner", PAD + 110, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Sells@", PAD + 200, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Buys@", PAD + 270, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Margin", this.width - PAD - 100, hy, 0xFF666666, false);
+            ctx.drawText(textRenderer, "Owner", PAD + itemColWidth + 10, hy, 0xFF666666, false);
+            ctx.drawText(textRenderer, "Margin", this.width - PAD - profitColWidth, hy, 0xFF666666, false);
         } else {
-            ctx.drawText(textRenderer, "Qty", PAD + 120, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Buy@", PAD + 160, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Sell@", PAD + 230, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Profit", this.width - PAD - 160, hy, 0xFF666666, false);
-            ctx.drawText(textRenderer, "Warps", this.width - PAD - 90, hy, 0xFF666666, false);
+            ctx.drawText(textRenderer, "Profit", this.width - PAD - profitColWidth - warpsColWidth - 20, hy, 0xFF666666, false);
+            ctx.drawText(textRenderer, "Warps", this.width - PAD - warpsColWidth, hy, 0xFF666666, false);
         }
 
         int rowStart = listTop + 12;
@@ -322,6 +442,9 @@ public class ProfitScreen extends Screen {
                     : "No profitable flips (check shop_data / ignore lists).";
             ctx.drawText(textRenderer, empty, PAD, rowStart + 8, 0xFF888888, false);
         }
+
+        clearChildren();
+        init();
 
         ProfitFinder.Trade hovered = null;
         for (int i = 0; i < visibleRows; i++) {
@@ -337,31 +460,56 @@ public class ProfitScreen extends Screen {
                 hovered = t;
             }
 
-            String name = t.item.length() > 16 ? t.item.substring(0, 15) + "…" : t.item;
+            String name = t.item.length() > itemNameMaxChars ? t.item.substring(0, itemNameMaxChars - 1) + "…" : t.item;
             ctx.drawText(textRenderer, name, PAD, rowY + 2, 0xFFFFFFAA, false);
 
             if (mode == Mode.SELF) {
-                String owner = t.seller.length() > 12 ? t.seller.substring(0, 11) + "…" : t.seller;
-                ctx.drawText(textRenderer, owner, PAD + 110, rowY + 2, 0xFFCCCCCC, false);
-                ctx.drawText(textRenderer, String.format(Locale.US, "$%.2f", t.sellPrice),
-                        PAD + 200, rowY + 2, 0xFFFF8888, false);
-                ctx.drawText(textRenderer, String.format(Locale.US, "$%.2f", t.buyPrice),
-                        PAD + 270, rowY + 2, 0xFF88FF88, false);
+                String owner = t.seller.length() > SELF_OWNER_NAME_MAX_CHARS ? t.seller.substring(0, SELF_OWNER_NAME_MAX_CHARS - 1) + "…" : t.seller;
+                ctx.drawText(textRenderer, owner, PAD + itemColWidth + 10, rowY + 2, 0xFFCCCCCC, false);
                 ctx.drawText(textRenderer, String.format(Locale.US, "$%.2f/ea", t.profitPerItem),
-                        this.width - PAD - 100, rowY + 2, 0xFF55FF55, false);
-                ctx.drawText(textRenderer, shortWarp(t.sellerWarp), PAD, rowY + 11, 0xFF666666, false);
+                        this.width - PAD - profitColWidth, rowY + 2, 0xFF55FF55, false);
+
+                // Add warp button for Self-Flip mode
+                int warpBtnX = this.width - PAD - warpBtnW;
+                String sellerWarpLabel = shortWarp(t.sellerWarp, warpNameMaxChars);
+                if (!t.sellerWarp.isBlank()) {
+                    ButtonWidget sellerWarpBtn = ButtonWidget.builder(
+                                    Text.literal(sellerWarpLabel),
+                                    b -> runWarpCommand(t.sellerWarp)
+                            ).dimensions(warpBtnX, rowY, warpBtnW, 16)
+                            .tooltip(Tooltip.of(Text.literal("Warp to: " + t.sellerWarp)))
+                            .build();
+                    addDrawableChild(sellerWarpBtn);
+                }
             } else {
-                ctx.drawText(textRenderer, String.format(Locale.US, "%,d", t.quantity),
-                        PAD + 120, rowY + 2, 0xFFFFFFFF, false);
-                ctx.drawText(textRenderer, String.format(Locale.US, "$%.2f", t.sellPrice),
-                        PAD + 160, rowY + 2, 0xFFFF8888, false);
-                ctx.drawText(textRenderer, String.format(Locale.US, "$%.2f", t.buyPrice),
-                        PAD + 230, rowY + 2, 0xFF88FF88, false);
                 ctx.drawText(textRenderer, String.format(Locale.US, "$%,.0f", t.totalProfit),
-                        this.width - PAD - 160, rowY + 2, 0xFF55FF55, false);
-                ctx.drawText(textRenderer, shortWarp(t.sellerWarp) + "→" + shortWarp(t.buyerWarp),
-                        this.width - PAD - 90, rowY + 2, 0xFFAAAAFF, false);
+                        this.width - PAD - profitColWidth - warpsColWidth - 20, rowY + 2, 0xFF55FF55, false);
+
                 ctx.drawText(textRenderer, t.seller + " → " + t.buyer, PAD, rowY + 11, 0xFF666666, false);
+
+                int warpBtnX = this.width - PAD - warpBtnW - 10;
+                String sellerWarpLabel = shortWarp(t.sellerWarp, warpNameMaxChars);
+                String buyerWarpLabel = shortWarp(t.buyerWarp, warpNameMaxChars);
+
+                if (!t.sellerWarp.isBlank()) {
+                    ButtonWidget sellerWarpBtn = ButtonWidget.builder(
+                                    Text.literal(sellerWarpLabel),
+                                    b -> runWarpCommand(t.sellerWarp)
+                            ).dimensions(warpBtnX - warpBtnW - 5, rowY, warpBtnW, 16)
+                            .tooltip(Tooltip.of(Text.literal("Warp to seller: " + t.sellerWarp)))
+                            .build();
+                    addDrawableChild(sellerWarpBtn);
+                }
+
+                if (!t.buyerWarp.isBlank()) {
+                    ButtonWidget buyerWarpBtn = ButtonWidget.builder(
+                                    Text.literal(buyerWarpLabel),
+                                    b -> runWarpCommand(t.buyerWarp)
+                            ).dimensions(warpBtnX, rowY, warpBtnW, 16)
+                            .tooltip(Tooltip.of(Text.literal("Warp to buyer: " + t.buyerWarp)))
+                            .build();
+                    addDrawableChild(buyerWarpBtn);
+                }
             }
         }
 
@@ -377,10 +525,11 @@ public class ProfitScreen extends Screen {
                         hovered.profitPerItem)));
                 tip.add(Text.literal("Warp: " + (hovered.sellerWarp.isEmpty() ? "(none)" : hovered.sellerWarp)));
             } else {
-                tip.add(Text.literal(String.format(Locale.US, "Buy %d @ $%.2f from %s",
-                        hovered.quantity, hovered.sellPrice, hovered.seller)));
+                tip.add(Text.literal(String.format(Locale.US, "Qty: %d", hovered.quantity)).formatted(Formatting.GOLD));
+                tip.add(Text.literal(String.format(Locale.US, "Buy @ $%.2f from %s",
+                        hovered.sellPrice, hovered.seller)).formatted(Formatting.GREEN));
                 tip.add(Text.literal(String.format(Locale.US, "Sell @ $%.2f to %s",
-                        hovered.buyPrice, hovered.buyer)));
+                        hovered.buyPrice, hovered.buyer)).formatted(Formatting.RED));
                 tip.add(Text.literal(String.format(Locale.US, "Edge $%.2f/ea · total $%,.2f · capital $%,.2f",
                         hovered.profitPerItem, hovered.totalProfit, hovered.capital)));
                 tip.add(Text.literal("Warp buy: " + (hovered.sellerWarp.isEmpty() ? "(none)" : hovered.sellerWarp)));
@@ -393,38 +542,85 @@ public class ProfitScreen extends Screen {
     }
 
     private void renderIgnore(DrawContext ctx, int mouseX, int mouseY) {
-        ctx.drawText(textRenderer,
-                "Ignore " + ignoreKind.label + " — excluded from Flips & Self-flip",
-                PAD, 48, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Ignore lists — excluded from Flips & Self-flip",
+                PAD, 28, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Files in config/sunnyMod/",
+                PAD, 40, 0xFF888888, false);
 
         int listTop = HEADER_H + 8;
         int listBottom = this.height - FOOTER_H - 4;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
-        maxScroll = Math.max(0, ignoreEntries.size() - visibleRows);
-        if (scrollOffset > maxScroll) scrollOffset = maxScroll;
 
-        ctx.drawText(textRenderer,
-                String.format(Locale.US, "%d entries · click Remove · files in config/sunnyMod/",
-                        ignoreEntries.size()),
-                PAD, listTop - 12, 0xFF888888, false);
+        // Draw column headers
+        ctx.drawText(textRenderer, "Items", IGNORE_COL_1_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Players", IGNORE_COL_2_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Warps", IGNORE_COL_3_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
 
-        if (ignoreEntries.isEmpty()) {
-            ctx.drawText(textRenderer, "List empty — add names below.", PAD, listTop + 8, 0xFF888888, false);
+        // Highlight the selected column
+        int headerY = listTop - IGNORE_TEXT_VERTICAL_SPACING - 2;
+        if (ignoreKind == ProfitFinder.IgnoreKind.ITEMS) {
+            ctx.fill(IGNORE_COL_1_X - 2, headerY, IGNORE_COL_1_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
+        } else if (ignoreKind == ProfitFinder.IgnoreKind.PLAYERS) {
+            ctx.fill(IGNORE_COL_2_X - 2, headerY, IGNORE_COL_2_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
+        } else if (ignoreKind == ProfitFinder.IgnoreKind.WARPS) {
+            ctx.fill(IGNORE_COL_3_X - 2, headerY, IGNORE_COL_3_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
         }
 
+        // Draw Items column
         for (int i = 0; i < visibleRows; i++) {
-            int idx = scrollOffset + i;
-            if (idx >= ignoreEntries.size()) break;
-            String entry = ignoreEntries.get(idx);
+            int idx = itemsScrollOffset + i;
+            if (idx >= ignoreItems.size()) break;
             int rowY = listTop + i * ROW_HEIGHT;
+            String entry = ignoreItems.get(idx);
+            String displayEntry = entry.length() > 20 ? entry.substring(0, 19) + "…" : entry;
+
             boolean hover = mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
-                    && mouseX >= PAD && mouseX < this.width - PAD;
+                    && mouseX >= IGNORE_COL_1_X && mouseX < IGNORE_COL_1_X + IGNORE_COL_WIDTH;
             if (hover) {
-                ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+                ctx.fill(IGNORE_COL_1_X - 2, rowY - 1, IGNORE_COL_1_X + IGNORE_COL_WIDTH + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
             }
-            ctx.drawText(textRenderer, entry, PAD, rowY + 6, 0xFFFFFFFF, false);
-            int remColor = (hover && mouseX >= this.width - PAD - 70) ? 0xFFFF5555 : 0xFFAA6666;
-            ctx.drawText(textRenderer, "Remove", this.width - PAD - 55, rowY + 6, remColor, false);
+
+            ctx.drawText(textRenderer, displayEntry, IGNORE_COL_1_X, rowY + 6, 0xFFFFFFFF, false);
+            int remColor = (hover && mouseX >= IGNORE_COL_1_X + IGNORE_COL_WIDTH - 50) ? 0xFFFF5555 : 0xFFAA6666;
+            ctx.drawText(textRenderer, "Remove", IGNORE_COL_1_X + IGNORE_COL_WIDTH - 45, rowY + 6, remColor, false);
+        }
+
+        // Draw Players column
+        for (int i = 0; i < visibleRows; i++) {
+            int idx = playersScrollOffset + i;
+            if (idx >= ignorePlayers.size()) break;
+            int rowY = listTop + i * ROW_HEIGHT;
+            String entry = ignorePlayers.get(idx);
+            String displayEntry = entry.length() > 20 ? entry.substring(0, 19) + "…" : entry;
+
+            boolean hover = mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                    && mouseX >= IGNORE_COL_2_X && mouseX < IGNORE_COL_2_X + IGNORE_COL_WIDTH;
+            if (hover) {
+                ctx.fill(IGNORE_COL_2_X - 2, rowY - 1, IGNORE_COL_2_X + IGNORE_COL_WIDTH + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+            }
+
+            ctx.drawText(textRenderer, displayEntry, IGNORE_COL_2_X, rowY + 6, 0xFFFFFFFF, false);
+            int remColor = (hover && mouseX >= IGNORE_COL_2_X + IGNORE_COL_WIDTH - 50) ? 0xFFFF5555 : 0xFFAA6666;
+            ctx.drawText(textRenderer, "Remove", IGNORE_COL_2_X + IGNORE_COL_WIDTH - 45, rowY + 6, remColor, false);
+        }
+
+        // Draw Warps column
+        for (int i = 0; i < visibleRows; i++) {
+            int idx = warpsScrollOffset + i;
+            if (idx >= ignoreWarps.size()) break;
+            int rowY = listTop + i * ROW_HEIGHT;
+            String entry = ignoreWarps.get(idx);
+            String displayEntry = entry.length() > 20 ? entry.substring(0, 19) + "…" : entry;
+
+            boolean hover = mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                    && mouseX >= IGNORE_COL_3_X && mouseX < IGNORE_COL_3_X + IGNORE_COL_WIDTH;
+            if (hover) {
+                ctx.fill(IGNORE_COL_3_X - 2, rowY - 1, IGNORE_COL_3_X + IGNORE_COL_WIDTH + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+            }
+
+            ctx.drawText(textRenderer, displayEntry, IGNORE_COL_3_X, rowY + 6, 0xFFFFFFFF, false);
+            int remColor = (hover && mouseX >= IGNORE_COL_3_X + IGNORE_COL_WIDTH - 50) ? 0xFFFF5555 : 0xFFAA6666;
+            ctx.drawText(textRenderer, "Remove", IGNORE_COL_3_X + IGNORE_COL_WIDTH - 45, rowY + 6, remColor, false);
         }
     }
 
@@ -442,15 +638,18 @@ public class ProfitScreen extends Screen {
 
         int hy = listTop;
         ctx.drawText(textRenderer, "Warp", PAD, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Items", PAD + 150, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Total edge", PAD + 210, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Age", PAD + 300, hy, 0xFF666666, false);
+        ctx.drawText(textRenderer, "Items", PAD + UPDATE_ITEMS_COL_WIDTH, hy, 0xFF666666, false);
+        ctx.drawText(textRenderer, "Total edge", PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH, hy, 0xFF666666, false);
+        ctx.drawText(textRenderer, "Age", PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH + UPDATE_AGE_COL_WIDTH, hy, 0xFF666666, false);
 
         int rowStart = listTop + 12;
         if (updatePriorities.isEmpty()) {
             ctx.drawText(textRenderer, "Nothing stale right now — all tracked shops are Active.",
                     PAD, rowStart + 8, 0xFF888888, false);
         }
+
+        clearChildren();
+        init();
 
         ProfitFinder.WarpSummary hovered = null;
         for (int i = 0; i < visibleRows; i++) {
@@ -467,44 +666,37 @@ public class ProfitScreen extends Screen {
                 hovered = w;
             }
 
-            String warpName = hasWarp ? shortWarp(w.warp) : "(no warp saved)";
+            String warpName = hasWarp ? shortWarp(w.warp, UPDATE_WARP_NAME_MAX_CHARS) : "(no warp saved)";
             int nameColor = hasWarp ? 0xFFFFFFAA : 0xFF777766;
             ctx.drawText(textRenderer, warpName, PAD, rowY + 2, nameColor, false);
-            ctx.drawText(textRenderer, String.valueOf(w.items.size()), PAD + 150, rowY + 2, 0xFFCCCCCC, false);
+            ctx.drawText(textRenderer, String.valueOf(w.items.size()), PAD + UPDATE_ITEMS_COL_WIDTH, rowY + 2, 0xFFCCCCCC, false);
             ctx.drawText(textRenderer, w.totalPotentialValue > 0
                             ? String.format(Locale.US, "+$%.2f", w.totalPotentialValue) : "—",
-                    PAD + 210, rowY + 2, w.totalPotentialValue > 0 ? 0xFF55FF55 : 0xFF666666, false);
+                    PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH, rowY + 2, w.totalPotentialValue > 0 ? 0xFF55FF55 : 0xFF666666, false);
             ctx.drawText(textRenderer, String.format(Locale.US, "%.0fh", w.maxAgeHours),
-                    PAD + 300, rowY + 2, 0xFFAAAAAA, false);
+                    PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH + UPDATE_AGE_COL_WIDTH, rowY + 2, 0xFFAAAAAA, false);
 
-            String preview = w.items.stream()
-                    .map(p -> p.item.length() > 12 ? p.item.substring(0, 11) + "…" : p.item)
-                    .limit(3)
-                    .reduce((a, b) -> a + ", " + b).orElse("");
-            if (w.items.size() > 3) preview += ", …";
-            String sub = preview + (w.maxNoChangeStreak > 0 ? " · unchanged x" + w.maxNoChangeStreak : "");
-            ctx.drawText(textRenderer, sub, PAD, rowY + 11, 0xFF666666, false);
+            // Add warp button for Update Priorities mode
+            int warpBtnX = this.width - PAD - UPDATE_WARP_BTN_W;
+            if (hasWarp) {
+                ButtonWidget warpBtn = ButtonWidget.builder(
+                                Text.literal(shortWarp(w.warp, UPDATE_WARP_NAME_MAX_CHARS)),
+                                b -> runWarpCommand(w.warp)
+                        ).dimensions(warpBtnX, rowY, UPDATE_WARP_BTN_W, 16)
+                        .tooltip(Tooltip.of(Text.literal("Warp to: " + w.warp)))
+                        .build();
+                addDrawableChild(warpBtn);
+            }
         }
 
         if (hovered != null) {
             List<Text> tip = new ArrayList<>();
             tip.add(Text.literal(hovered.warp.isEmpty() ? "(no warp saved)" : hovered.warp));
-            tip.add(Text.literal(String.format(Locale.US, "%d stale item%s · total edge +$%.2f",
-                    hovered.items.size(), hovered.items.size() == 1 ? "" : "s", hovered.totalPotentialValue)));
+            tip.add(Text.literal(String.format(Locale.US, "%d stale items · total edge +$%.2f",
+                    hovered.items.size(), hovered.totalPotentialValue)));
             tip.add(Text.literal(String.format(Locale.US, "Oldest scan %.0fh ago · worst streak %d unchanged rescans",
                     hovered.maxAgeHours, hovered.maxNoChangeStreak)));
-            int shown = 0;
-            for (ProfitFinder.WarpPriority p : hovered.items) {
-                if (shown >= 6) {
-                    tip.add(Text.literal("…and " + (hovered.items.size() - shown) + " more"));
-                    break;
-                }
-                tip.add(Text.literal("• " + p.item + " (" + p.action + ", " + p.status + ") "
-                        + (p.potentialValue > 0
-                        ? String.format(Locale.US, "+$%.2f/ea", p.potentialValue)
-                        : "no current match")));
-                shown++;
-            }
+
             tip.add(Text.literal("Click to warp: " + (hovered.warp.isEmpty() ? "(no warp saved)" : hovered.warp)));
             ctx.drawTooltip(textRenderer, tip, mouseX, mouseY);
         }
@@ -512,11 +704,11 @@ public class ProfitScreen extends Screen {
         ctx.drawText(textRenderer, "F8 · scroll", PAD, this.height - 18, 0xFF666666, false);
     }
 
-    private static String shortWarp(String w) {
+    private static String shortWarp(String w, int maxChars) {
         if (w == null || w.isBlank()) return "—";
         String s = w.startsWith("/warp ") ? w.substring(6) : w;
         if (s.startsWith("warp ")) s = s.substring(5);
-        return s.length() > 8 ? s.substring(0, 7) + "…" : s;
+        return s.length() > maxChars ? s.substring(0, maxChars - 1) + "…" : s;
     }
 
     @Override
