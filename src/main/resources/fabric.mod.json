@@ -21,7 +21,8 @@
       "me.midwu.sunnyMod.client.Container_reader",
       "me.midwu.sunnyMod.client.Servershoplogger",
       "me.midwu.sunnyMod.client.Premiumshoplogger",
-      "me.midwu.sunnyMod.client.AuctionHouseLogger"
+      "me.midwu.sunnyMod.client.AuctionHouseLogger",
+      "me.midwu.sunnyMod.client.ShopHighlighter"
     ],
     "modmenu": [
       "me.midwu.sunnyMod.client.ModMenuIntegration"

@@ -43,7 +43,7 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-
+    implementation 'com.google.code.gson:gson:2.10.1'
     modImplementation "me.shedaniel.cloth:cloth-config-fabric:21.11.152"
     modImplementation "maven.modrinth:modmenu:17.0.0"
 }

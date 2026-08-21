@@ -363,7 +363,7 @@ public class ProfitScreen extends Screen {
                 int rowY = rowStart + i * ROW_HEIGHT;
                 if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
                         && mouseX >= PAD && mouseX < this.width - PAD) {
-                    runWarpCommand(updatePriorities.get(idx).warp);
+                    runWarpCommandAndHighlight(updatePriorities.get(idx).warp);
                     return true;
                 }
             }
@@ -375,6 +375,13 @@ public class ProfitScreen extends Screen {
         if (warp == null || warp.isBlank() || client == null || client.player == null) return;
         String cmd = warp.startsWith("/") ? warp.substring(1) : warp;
         client.player.networkHandler.sendChatCommand(cmd);
+    }
+
+    /** Same as runWarpCommand, but also lights up the shop_data.csv coord boxes.
+     *  Only the Update tab's warp buttons should call this one. */
+    private void runWarpCommandAndHighlight(String warp) {
+        runWarpCommand(warp);
+        ShopHighlighter.activateForCurrentShopData();
     }
 
     @Override
@@ -681,7 +688,7 @@ public class ProfitScreen extends Screen {
             if (hasWarp) {
                 ButtonWidget warpBtn = ButtonWidget.builder(
                                 Text.literal(shortWarp(w.warp, UPDATE_WARP_NAME_MAX_CHARS)),
-                                b -> runWarpCommand(w.warp)
+                                b -> runWarpCommandAndHighlight(w.warp)
                         ).dimensions(warpBtnX, rowY, UPDATE_WARP_BTN_W, 16)
                         .tooltip(Tooltip.of(Text.literal("Warp to: " + w.warp)))
                         .build();
