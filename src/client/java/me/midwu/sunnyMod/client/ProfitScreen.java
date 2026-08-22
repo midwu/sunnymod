@@ -380,6 +380,7 @@ public class ProfitScreen extends Screen {
     /** Same as runWarpCommand, but also lights up the shop_data.csv coord boxes.
      *  Only the Update tab's warp buttons should call this one. */
     private void runWarpCommandAndHighlight(String warp) {
+        System.out.println("[ProfitScreen] Running warp command and highlighting for warp: " + warp);
         runWarpCommand(warp);
 
         // Strip "/warp " or "/home " prefixes to get the warp name
@@ -389,6 +390,7 @@ public class ProfitScreen extends Screen {
         } else if (currentWarp.startsWith("/home ")) {
             currentWarp = currentWarp.substring(6);
         }
+        System.out.println("[ProfitScreen] Stripped warp name: " + currentWarp);
 
         // Activate the highlighter for the current warp
         ShopHighlighter.activateForCurrentShopData(currentWarp);
