@@ -28,6 +28,8 @@ public class ShopHighlighter implements ClientModInitializer {
     private static volatile boolean active = false;
     private static int tickCounter = 0;
     private static final int RECHECK_INTERVAL_TICKS = 20;
+
+    // Highlight color (green)
     private static final float R = 0.3f;
     private static final float G = 1.0f;
     private static final float B = 0.4f;
@@ -40,22 +42,24 @@ public class ShopHighlighter implements ClientModInitializer {
         WorldRenderEvents.AFTER_ENTITIES.register(ShopHighlighter::onRender);
     }
 
-    public static void activateForCurrentShopData() {
-        activateForCurrentShopData(null);
-    }
-
+    /**
+     * Activates the highlighter for the current warp.
+     * @param currentWarp The warp name (e.g., "serstore" from "/warp serstore").
+     */
     public static void activateForCurrentShopData(String currentWarp) {
         snapshotTimestamps.clear();
         pendingBoxes.clear();
 
         for (String[] row : readAllRows()) {
             if (row.length == 0) continue;
+
             String location = row[0].trim();
             if (location.isBlank()) continue;
 
-            if (currentWarp != null) {
-                String warp = row.length > 8 ? row[8].trim() : "";
-                if (!warp.equals(currentWarp)) continue;
+            // Filter by warp (column 8)
+            String warp = row.length > 8 ? row[8].trim() : "";
+            if (!warp.equals(currentWarp) && !warp.equals("/warp " + currentWarp) && !warp.equals("/home " + currentWarp)) {
+                continue; // Skip if warp doesn't match
             }
 
             BlockPos pos = parseLocation(location);
@@ -70,6 +74,9 @@ public class ShopHighlighter implements ClientModInitializer {
         tickCounter = 0;
     }
 
+    /**
+     * Deactivates the highlighter.
+     */
     public static void deactivate() {
         active = false;
         snapshotTimestamps.clear();
@@ -77,6 +84,9 @@ public class ShopHighlighter implements ClientModInitializer {
         tickCounter = 0;
     }
 
+    /**
+     * Periodically checks for timestamp changes in the CSV.
+     */
     private static void onTick() {
         if (!active) return;
         if (++tickCounter < RECHECK_INTERVAL_TICKS) return;
@@ -84,6 +94,7 @@ public class ShopHighlighter implements ClientModInitializer {
 
         for (String[] row : readAllRows()) {
             if (row.length == 0) continue;
+
             String location = row[0].trim();
             if (!pendingBoxes.containsKey(location)) continue;
 
@@ -99,6 +110,9 @@ public class ShopHighlighter implements ClientModInitializer {
         if (pendingBoxes.isEmpty()) active = false;
     }
 
+    /**
+     * Renders the highlight boxes.
+     */
     private static void onRender(WorldRenderContext context) {
         if (!active || pendingBoxes.isEmpty()) return;
 
@@ -110,9 +124,10 @@ public class ShopHighlighter implements ClientModInitializer {
         matrices.push();
 
         for (BlockPos pos : pendingBoxes.values()) {
+            // Create a box centered at the BlockPos with size 1.0 (from -0.5 to +0.5)
             Box box = new Box(
-                    pos.getX() - 0.495, pos.getY() - 0.495, pos.getZ() - 0.495,
-                    pos.getX() + 0.495, pos.getY() + 0.495, pos.getZ() + 0.495
+                    pos.getX() - 0.5, pos.getY() - 0.5, pos.getZ() - 0.5,
+                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5
             );
             drawBox(matrices, lineBuffer, box, R, G, B, LINE_ALPHA);
         }
@@ -120,6 +135,9 @@ public class ShopHighlighter implements ClientModInitializer {
         matrices.pop();
     }
 
+    /**
+     * Draws a box using lines.
+     */
     private static void drawBox(
             MatrixStack matrices,
             VertexConsumer buffer,
@@ -153,6 +171,9 @@ public class ShopHighlighter implements ClientModInitializer {
         drawLine(entry, buffer, minX, minY, maxZ, minX, maxY, maxZ, r, g, b, a);
     }
 
+    /**
+     * Draws a line segment with Normal and lineWidth attributes.
+     */
     private static void drawLine(
             MatrixStack.Entry entry,
             VertexConsumer buffer,
@@ -180,6 +201,9 @@ public class ShopHighlighter implements ClientModInitializer {
     // CSV Parsing
     // ---------------------------------------------------------------------
 
+    /**
+     * Reads all rows from shop_data.csv.
+     */
     private static List<String[]> readAllRows() {
         List<String[]> rows = new ArrayList<>();
         if (!Files.exists(CSV_FILE)) return rows;
@@ -201,6 +225,9 @@ public class ShopHighlighter implements ClientModInitializer {
         return rows;
     }
 
+    /**
+     * Parses a CSV line, handling quoted fields and escaped quotes.
+     */
     private static String[] parseCsvLine(String line) {
         List<String> fields = new ArrayList<>();
         StringBuilder current = new StringBuilder();
@@ -234,6 +261,9 @@ public class ShopHighlighter implements ClientModInitializer {
         return fields.toArray(new String[0]);
     }
 
+    /**
+     * Parses a location string (e.g., "10 5 -10") into a BlockPos.
+     */
     private static BlockPos parseLocation(String location) {
         String[] parts = location.trim().split("\\s+");
         if (parts.length < 3) return null;

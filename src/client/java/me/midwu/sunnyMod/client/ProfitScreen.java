@@ -45,7 +45,7 @@ public class ProfitScreen extends Screen {
     // --- UPDATE PAGE VARIABLES ---
     private static final int UPDATE_WARP_COL_WIDTH = 140;  // Width of the Warp column in Update mode
     private static final int UPDATE_ITEMS_COL_WIDTH = 120;  // Width of the Items column in Update mode
-    private static final int UPDATE_EDGE_COL_WIDTH = 140;  // Width of the Total Edge column in Update mode
+    private static final int UPDATE_EDGE_COL_WIDTH = 140;   // Width of the Total Edge column in Update mode
     private static final int UPDATE_AGE_COL_WIDTH = 120;   // Width of the Age column in Update mode
     private static final int UPDATE_WARP_BTN_W = 180;      // Width of warp button in Update mode
     private static final int UPDATE_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Update mode
@@ -381,7 +381,20 @@ public class ProfitScreen extends Screen {
      *  Only the Update tab's warp buttons should call this one. */
     private void runWarpCommandAndHighlight(String warp) {
         runWarpCommand(warp);
-        ShopHighlighter.activateForCurrentShopData();
+
+        // Strip "/warp " or "/home " prefixes to get the warp name
+        String currentWarp = warp;
+        if (currentWarp.startsWith("/warp ")) {
+            currentWarp = currentWarp.substring(6);
+        } else if (currentWarp.startsWith("/home ")) {
+            currentWarp = currentWarp.substring(6);
+        }
+
+        // Activate the highlighter for the current warp
+        ShopHighlighter.activateForCurrentShopData(currentWarp);
+
+        // Close the screen after warping
+        this.close();
     }
 
     @Override
