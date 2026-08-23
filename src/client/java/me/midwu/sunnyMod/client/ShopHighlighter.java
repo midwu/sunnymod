@@ -181,9 +181,14 @@ public class ShopHighlighter implements ClientModInitializer {
 
         List<Box> boxes = new ArrayList<>(pendingBoxes.size());
         for (BlockPos pos : pendingBoxes.values()) {
+            // Adjust the box position by +0.5 in X, Y, and Z to center it on the block
             boxes.add(new Box(
-                    pos.getX() - 0.5, pos.getY() - 0.5, pos.getZ() - 0.5,
-                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5
+                    pos.getX() - 0.5 + 0.5,  // X: Shift by +0.5
+                    pos.getY() - 0.5 + 0.5,  // Y: Shift by +0.5
+                    pos.getZ() - 0.5 + 0.5,  // Z: Shift by +0.5
+                    pos.getX() + 0.5 + 0.5,  // X: Shift by +0.5
+                    pos.getY() + 0.5 + 0.5,  // Y: Shift by +0.5
+                    pos.getZ() + 0.5 + 0.5   // Z: Shift by +0.5
             ));
         }
 
