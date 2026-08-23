@@ -132,14 +132,16 @@ public class ShopHighlighter implements ClientModInitializer {
     private static boolean warpMatches(String warpColumn, String currentWarp) {
         if (warpColumn.isBlank() || warpColumn.equals("?")) return false;
 
-        String bare = warpColumn;
-        if (bare.regionMatches(true, 0, "/warp ", 0, 6)) {
-            bare = bare.substring(6);
-        } else if (bare.regionMatches(true, 0, "/home ", 0, 6)) {
-            bare = bare.substring(6);
-        }
+        // Comment out the stripping logic to test if it resolves the issue
+        // String bare = warpColumn;
+        // if (bare.regionMatches(true, 0, "/warp ", 0, 6)) {
+        //     bare = bare.substring(6);
+        // } else if (bare.regionMatches(true, 0, "/home ", 0, 6)) {
+        //     bare = bare.substring(6);
+        // }
 
-        return bare.trim().equalsIgnoreCase(currentWarp.trim());
+        // Directly compare the raw warpColumn with currentWarp
+        return warpColumn.trim().equalsIgnoreCase(currentWarp.trim());
     }
 
     // ---------------------------------------------------------------------
