@@ -4,12 +4,11 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.VertexConsumerProvider;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Box;
+import net.signfinder.util.ColorUtils;
+import net.signfinder.util.RenderUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -22,12 +21,17 @@ import java.util.Map;
 
 /**
  * Reads shop_data.csv, filters it down to the entries whose "Warp" column
- * matches the warp the player is currently heading to / standing at, and
- * draws a wireframe box around each matching shop's coordinates.
+ * matches the warp the player is currently heading to, and draws a
+ * see-through (ESP-style) box around each matching shop's coordinates -
+ * using SignFinder's own rendering utilities, the same ones it uses for
+ * `/findsign`, so we get its actual no-depth-test pipeline instead of
+ * re-deriving the new GPU render pipeline API by hand.
  * <p>
  * Entry point from outside this class: {@link #activateForCurrentShopData(String)},
  * called by {@code ProfitScreen.runWarpCommandAndHighlight(String)} when a
  * warp button on the Update tab is clicked.
+ * <p>
+ * Requires the SignFinder mod to be installed (see fabric.mod.json depends).
  */
 public class ShopHighlighter implements ClientModInitializer {
 
@@ -42,12 +46,13 @@ public class ShopHighlighter implements ClientModInitializer {
     private static int tickCounter = 0;
     private static final int RECHECK_INTERVAL_TICKS = 20; // re-read the CSV once a second while active
 
-    // Highlight color (green), 0f-1f components
-    private static final float R = 0.3f;
-    private static final float G = 1.0f;
-    private static final float B = 0.4f;
-    private static final float LINE_ALPHA = 0.9f;
-    private static final float LINE_WIDTH = 2.0f;
+    // Highlight color: bright green, fully opaque outline.
+    // ColorUtils.createArgb(alpha, red, green, blue) -> packed 0xAARRGGBB int,
+    // exactly what RenderUtils expects (it's SignFinder's own color format).
+    private static final int LINE_COLOR = ColorUtils.createArgb(255, 76, 255, 102);
+
+    /** false = SignFinder's ESP_LINES pipeline (NO_DEPTH_TEST) -> renders through walls. */
+    private static final boolean DEPTH_TEST = false;
 
     @Override
     public void onInitializeClient() {
@@ -154,84 +159,29 @@ public class ShopHighlighter implements ClientModInitializer {
     }
 
     // ---------------------------------------------------------------------
-    // Rendering
+    // Rendering - delegates straight to SignFinder's own utility
     // ---------------------------------------------------------------------
 
     private static void onRender(WorldRenderContext context) {
         if (!active || pendingBoxes.isEmpty()) return;
 
         MatrixStack matrices = context.matrices();
-        VertexConsumerProvider consumers = context.consumers();
-        if (matrices == null || consumers == null) return;
+        if (matrices == null) return;
 
-        // RenderLayer (singular) is the class that actually owns LINES.
-        // RenderLayers (plural) is an unrelated block/fluid/item layer lookup helper.
-        VertexConsumer lineBuffer = consumers.getBuffer(RenderLayer.getLines());
-
-        matrices.push();
+        List<Box> boxes = new ArrayList<>(pendingBoxes.size());
         for (BlockPos pos : pendingBoxes.values()) {
-            Box box = new Box(
+            boxes.add(new Box(
                     pos.getX() - 0.5, pos.getY() - 0.5, pos.getZ() - 0.5,
                     pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5
-            );
-            drawBox(matrices, lineBuffer, box, R, G, B, LINE_ALPHA);
+            ));
         }
-        matrices.pop();
-    }
 
-    private static void drawBox(
-            MatrixStack matrices,
-            VertexConsumer buffer,
-            Box box,
-            float r, float g, float b, float a
-    ) {
-        MatrixStack.Entry entry = matrices.peek();
-        float minX = (float) box.minX;
-        float minY = (float) box.minY;
-        float minZ = (float) box.minZ;
-        float maxX = (float) box.maxX;
-        float maxY = (float) box.maxY;
-        float maxZ = (float) box.maxZ;
-
-        // Bottom face
-        drawLine(entry, buffer, minX, minY, minZ, maxX, minY, minZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, minY, minZ, maxX, minY, maxZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, minY, maxZ, minX, minY, maxZ, r, g, b, a);
-        drawLine(entry, buffer, minX, minY, maxZ, minX, minY, minZ, r, g, b, a);
-
-        // Top face
-        drawLine(entry, buffer, minX, maxY, minZ, maxX, maxY, minZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, maxY, minZ, maxX, maxY, maxZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, maxY, maxZ, minX, maxY, maxZ, r, g, b, a);
-        drawLine(entry, buffer, minX, maxY, maxZ, minX, maxY, minZ, r, g, b, a);
-
-        // Vertical edges
-        drawLine(entry, buffer, minX, minY, minZ, minX, maxY, minZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, minY, minZ, maxX, maxY, minZ, r, g, b, a);
-        drawLine(entry, buffer, maxX, minY, maxZ, maxX, maxY, maxZ, r, g, b, a);
-        drawLine(entry, buffer, minX, minY, maxZ, minX, maxY, maxZ, r, g, b, a);
-    }
-
-    private static void drawLine(
-            MatrixStack.Entry entry,
-            VertexConsumer buffer,
-            float x1, float y1, float z1,
-            float x2, float y2, float z2,
-            float r, float g, float b, float a
-    ) {
-        float nx = 0.0f;
-        float ny = 1.0f;
-        float nz = 0.0f;
-
-        buffer.vertex(entry.getPositionMatrix(), x1, y1, z1)
-                .color(r, g, b, a)
-                .normal(entry, nx, ny, nz)
-                .lineWidth(LINE_WIDTH);
-
-        buffer.vertex(entry.getPositionMatrix(), x2, y2, z2)
-                .color(r, g, b, a)
-                .normal(entry, nx, ny, nz)
-                .lineWidth(LINE_WIDTH);
+        // RenderUtils.drawOutlinedBoxes handles: picking the right RenderLayer
+        // (ESP_LINES / no depth test when DEPTH_TEST=false, so it renders
+        // through walls exactly like /findsign), the camera-relative offset,
+        // and the immediate draw call. We don't need to touch RenderLayer,
+        // RenderPipeline, or RenderSetup ourselves at all.
+        RenderUtils.drawOutlinedBoxes(matrices, boxes, LINE_COLOR, DEPTH_TEST);
     }
 
     // ---------------------------------------------------------------------
