@@ -19,23 +19,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Reads shop_data.csv, filters it down to the entries whose "Warp" column
- * matches the warp the player is currently heading to, and draws a
- * see-through (ESP-style) box around each matching shop's coordinates -
- * using SignFinder's own rendering utilities, the same ones it uses for
- * `/findsign`, so we get its actual no-depth-test pipeline instead of
- * re-deriving the new GPU render pipeline API by hand.
- * <p>
- * Entry point from outside this class: {@link #activateForCurrentShopData(String)},
- * called by {@code ProfitScreen.runWarpCommandAndHighlight(String)} when a
- * warp button on the Update tab is clicked.
- * <p>
- * Requires the SignFinder mod to be installed (see fabric.mod.json depends).
- */
 public class ShopHighlighter implements ClientModInitializer {
 
     private static final Path CSV_FILE = ShopLogger.getConfigDir().resolve("shop_data.csv");
+
+    // Debug: Log the CSV file path on initialization
+    public ShopHighlighter() {
+        System.out.println("[ShopHighlighter] Constructor called. CSV file path: " + CSV_FILE);
+    }
 
     /** location string ("x y z") -> timestamp, used to detect when a shop entry changes on disk. */
     private static final Map<String, String> snapshotTimestamps = new LinkedHashMap<>();
@@ -47,42 +38,34 @@ public class ShopHighlighter implements ClientModInitializer {
     private static final int RECHECK_INTERVAL_TICKS = 20; // re-read the CSV once a second while active
 
     // Highlight color: bright green, fully opaque outline.
-    // ColorUtils.createArgb(alpha, red, green, blue) -> packed 0xAARRGGBB int,
-    // exactly what RenderUtils expects (it's SignFinder's own color format).
     private static final int LINE_COLOR = ColorUtils.createArgb(255, 76, 255, 102);
-
-    /** false = SignFinder's ESP_LINES pipeline (NO_DEPTH_TEST) -> renders through walls. */
     private static final boolean DEPTH_TEST = false;
 
     @Override
     public void onInitializeClient() {
+        System.out.println("[ShopHighlighter] Initializing ShopHighlighter..."); // Debug log
         ClientTickEvents.END_CLIENT_TICK.register(client -> onTick());
         WorldRenderEvents.AFTER_ENTITIES.register(ShopHighlighter::onRender);
+        System.out.println("[ShopHighlighter] Registered tick and render events."); // Debug log
     }
 
     // ---------------------------------------------------------------------
     // Public API
     // ---------------------------------------------------------------------
 
-    /**
-     * (Re)loads shop_data.csv, keeps only the rows whose Warp column matches
-     * {@code currentWarp}, and starts drawing boxes around them.
-     *
-     * @param currentWarp the bare warp name, e.g. "serstore" (no "/warp " or
-     *                     "/home " prefix - ProfitScreen already strips that).
-     */
     public static void activateForCurrentShopData(String currentWarp) {
+        System.out.println("[ShopHighlighter] activateForCurrentShopData called with warp: " + currentWarp); // Debug log
         snapshotTimestamps.clear();
         pendingBoxes.clear();
 
         if (currentWarp == null || currentWarp.isBlank()) {
+            System.out.println("[ShopHighlighter] Warp is null or blank, deactivating.");
             active = false;
             return;
         }
 
         List<String[]> rows = readAllRows();
-        System.out.println("[ShopHighlighter] CSV has " + rows.size()
-                + " rows, matching against warp '" + currentWarp + "'");
+        System.out.println("[ShopHighlighter] CSV has " + rows.size() + " rows, matching against warp '" + currentWarp + "'");
 
         for (String[] row : rows) {
             if (row.length == 0) continue;
@@ -94,26 +77,25 @@ public class ShopHighlighter implements ClientModInitializer {
             if (!warpMatches(warpColumn, currentWarp)) continue;
 
             BlockPos pos = parseLocation(location);
-            if (pos == null) continue;
+            if (pos == null) {
+                System.err.println("[ShopHighlighter] Failed to parse location: " + location);
+                continue;
+            }
 
             String timestamp = row.length > 7 ? row[7].trim() : "";
             snapshotTimestamps.put(location, timestamp);
             pendingBoxes.put(location, pos);
+            System.out.println("[ShopHighlighter] Added box at: " + pos); // Debug log
         }
 
         active = !pendingBoxes.isEmpty();
         tickCounter = 0;
 
-        System.out.println("[ShopHighlighter] Matched " + pendingBoxes.size()
-                + " shop(s) for warp '" + currentWarp + "'. active=" + active);
-        if (active) {
-            System.out.println("[ShopHighlighter] First box at: "
-                    + pendingBoxes.values().iterator().next());
-        }
+        System.out.println("[ShopHighlighter] Matched " + pendingBoxes.size() + " shop(s) for warp '" + currentWarp + "'. active=" + active);
     }
 
-    /** Stops drawing and clears all stored boxes. */
     public static void deactivate() {
+        System.out.println("[ShopHighlighter] Deactivating..."); // Debug log
         active = false;
         snapshotTimestamps.clear();
         pendingBoxes.clear();
@@ -124,24 +106,25 @@ public class ShopHighlighter implements ClientModInitializer {
     // Warp matching
     // ---------------------------------------------------------------------
 
-    /**
-     * The CSV's Warp column stores the raw command, e.g. "/warp serstore" or
-     * "/home rismarine" (or "?" if unknown). {@code currentWarp} is just the
-     * bare name. Match either form, case-insensitively.
-     */
     private static boolean warpMatches(String warpColumn, String currentWarp) {
-        if (warpColumn.isBlank() || warpColumn.equals("?")) return false;
+        System.out.println("[ShopHighlighter] Comparing CSV warp: '" + warpColumn + "' with input: '" + currentWarp + "'"); // Debug log
+        if (warpColumn.isBlank() || warpColumn.equals("?")) {
+            System.out.println("[ShopHighlighter] Warp column is blank or '?', skipping.");
+            return false;
+        }
 
-        // Comment out the stripping logic to test if it resolves the issue
-        // String bare = warpColumn;
-        // if (bare.regionMatches(true, 0, "/warp ", 0, 6)) {
-        //     bare = bare.substring(6);
-        // } else if (bare.regionMatches(true, 0, "/home ", 0, 6)) {
-        //     bare = bare.substring(6);
-        // }
+        // Handle both "/warp koopa" and "koopa" in CSV
+        String bareWarp = warpColumn.trim();
+        if (bareWarp.startsWith("/warp ")) {
+            bareWarp = bareWarp.substring(6).trim();
+        } else if (bareWarp.startsWith("/home ")) {
+            bareWarp = bareWarp.substring(6).trim();
+        }
 
-        // Directly compare the raw warpColumn with currentWarp
-        return warpColumn.trim().equalsIgnoreCase(currentWarp.trim());
+        // Compare with currentWarp (case-insensitive)
+        boolean matches = bareWarp.equalsIgnoreCase(currentWarp.trim());
+        System.out.println("[ShopHighlighter] Stripped CSV warp: '" + bareWarp + "', matches: " + matches); // Debug log
+        return matches;
     }
 
     // ---------------------------------------------------------------------
@@ -153,6 +136,7 @@ public class ShopHighlighter implements ClientModInitializer {
         if (++tickCounter < RECHECK_INTERVAL_TICKS) return;
         tickCounter = 0;
 
+        System.out.println("[ShopHighlighter] Rechecking CSV for changes..."); // Debug log
         for (String[] row : readAllRows()) {
             if (row.length == 0) continue;
 
@@ -163,16 +147,20 @@ public class ShopHighlighter implements ClientModInitializer {
             String snapshotTimestamp = snapshotTimestamps.get(location);
 
             if (snapshotTimestamp != null && !snapshotTimestamp.equals(currentTimestamp)) {
+                System.out.println("[ShopHighlighter] Removing box at " + location + " (timestamp changed)");
                 pendingBoxes.remove(location);
                 snapshotTimestamps.remove(location);
             }
         }
 
-        if (pendingBoxes.isEmpty()) active = false;
+        if (pendingBoxes.isEmpty()) {
+            System.out.println("[ShopHighlighter] No more boxes, deactivating.");
+            active = false;
+        }
     }
 
     // ---------------------------------------------------------------------
-    // Rendering - delegates straight to SignFinder's own utility
+    // Rendering
     // ---------------------------------------------------------------------
 
     private static boolean loggedThisActivation = false;
@@ -199,11 +187,6 @@ public class ShopHighlighter implements ClientModInitializer {
             ));
         }
 
-        // RenderUtils.drawOutlinedBoxes handles: picking the right RenderLayer
-        // (ESP_LINES / no depth test when DEPTH_TEST=false, so it renders
-        // through walls exactly like /findsign), the camera-relative offset,
-        // and the immediate draw call. We don't need to touch RenderLayer,
-        // RenderPipeline, or RenderSetup ourselves at all.
         RenderUtils.drawOutlinedBoxes(matrices, boxes, LINE_COLOR, DEPTH_TEST);
     }
 
@@ -213,8 +196,12 @@ public class ShopHighlighter implements ClientModInitializer {
 
     private static List<String[]> readAllRows() {
         List<String[]> rows = new ArrayList<>();
-        if (!Files.exists(CSV_FILE)) return rows;
+        if (!Files.exists(CSV_FILE)) {
+            System.err.println("[ShopHighlighter] CSV file does not exist at: " + CSV_FILE); // Debug log
+            return rows;
+        }
 
+        System.out.println("[ShopHighlighter] Reading CSV file at: " + CSV_FILE); // Debug log
         try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {
             String line;
             boolean isHeader = true;
