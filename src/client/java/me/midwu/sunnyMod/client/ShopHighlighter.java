@@ -80,7 +80,11 @@ public class ShopHighlighter implements ClientModInitializer {
             return;
         }
 
-        for (String[] row : readAllRows()) {
+        List<String[]> rows = readAllRows();
+        System.out.println("[ShopHighlighter] CSV has " + rows.size()
+                + " rows, matching against warp '" + currentWarp + "'");
+
+        for (String[] row : rows) {
             if (row.length == 0) continue;
 
             String location = row[0].trim();
@@ -99,6 +103,13 @@ public class ShopHighlighter implements ClientModInitializer {
 
         active = !pendingBoxes.isEmpty();
         tickCounter = 0;
+
+        System.out.println("[ShopHighlighter] Matched " + pendingBoxes.size()
+                + " shop(s) for warp '" + currentWarp + "'. active=" + active);
+        if (active) {
+            System.out.println("[ShopHighlighter] First box at: "
+                    + pendingBoxes.values().iterator().next());
+        }
     }
 
     /** Stops drawing and clears all stored boxes. */
@@ -162,11 +173,21 @@ public class ShopHighlighter implements ClientModInitializer {
     // Rendering - delegates straight to SignFinder's own utility
     // ---------------------------------------------------------------------
 
+    private static boolean loggedThisActivation = false;
+
     private static void onRender(WorldRenderContext context) {
-        if (!active || pendingBoxes.isEmpty()) return;
+        if (!active || pendingBoxes.isEmpty()) {
+            loggedThisActivation = false;
+            return;
+        }
 
         MatrixStack matrices = context.matrices();
         if (matrices == null) return;
+
+        if (!loggedThisActivation) {
+            System.out.println("[ShopHighlighter] Rendering " + pendingBoxes.size() + " box(es) now.");
+            loggedThisActivation = true;
+        }
 
         List<Box> boxes = new ArrayList<>(pendingBoxes.size());
         for (BlockPos pos : pendingBoxes.values()) {
