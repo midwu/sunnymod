@@ -393,7 +393,7 @@ public class ProfitScreen extends Screen {
         System.out.println("[ProfitScreen] Stripped warp name: " + currentWarp);
 
         // Activate the highlighter for the current warp
-        // ShopHighlighter.activateForCurrentShopData(currentWarp);
+        ShopHighlighter.activateForCurrentShopData(currentWarp);
 
         // Close the screen after warping
         this.close();
