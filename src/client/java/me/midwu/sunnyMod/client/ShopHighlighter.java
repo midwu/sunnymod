@@ -23,11 +23,6 @@ public class ShopHighlighter implements ClientModInitializer {
 
     private static final Path CSV_FILE = ShopLogger.getConfigDir().resolve("shop_data.csv");
 
-    // Debug: Log the CSV file path on initialization
-    public ShopHighlighter() {
-        System.out.println("[ShopHighlighter] Constructor called. CSV file path: " + CSV_FILE);
-    }
-
     /** location string ("x y z") -> timestamp, used to detect when a shop entry changes on disk. */
     private static final Map<String, String> snapshotTimestamps = new LinkedHashMap<>();
     /** location string ("x y z") -> parsed block position, the boxes currently being drawn. */
@@ -43,10 +38,10 @@ public class ShopHighlighter implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        System.out.println("[ShopHighlighter] Initializing ShopHighlighter..."); // Debug log
+        System.out.println("[ShopHighlighter] Initializing ShopHighlighter...");
         ClientTickEvents.END_CLIENT_TICK.register(client -> onTick());
         WorldRenderEvents.AFTER_ENTITIES.register(ShopHighlighter::onRender);
-        System.out.println("[ShopHighlighter] Registered tick and render events."); // Debug log
+        System.out.println("[ShopHighlighter] Registered tick and render events.");
     }
 
     // ---------------------------------------------------------------------
@@ -54,7 +49,7 @@ public class ShopHighlighter implements ClientModInitializer {
     // ---------------------------------------------------------------------
 
     public static void activateForCurrentShopData(String currentWarp) {
-        System.out.println("[ShopHighlighter] activateForCurrentShopData called with warp: " + currentWarp); // Debug log
+        System.out.println("[ShopHighlighter] activateForCurrentShopData called with warp: " + currentWarp);
         snapshotTimestamps.clear();
         pendingBoxes.clear();
 
@@ -85,7 +80,7 @@ public class ShopHighlighter implements ClientModInitializer {
             String timestamp = row.length > 7 ? row[7].trim() : "";
             snapshotTimestamps.put(location, timestamp);
             pendingBoxes.put(location, pos);
-            System.out.println("[ShopHighlighter] Added box at: " + pos); // Debug log
+            System.out.println("[ShopHighlighter] Added box at: " + pos);
         }
 
         active = !pendingBoxes.isEmpty();
@@ -95,7 +90,7 @@ public class ShopHighlighter implements ClientModInitializer {
     }
 
     public static void deactivate() {
-        System.out.println("[ShopHighlighter] Deactivating..."); // Debug log
+        System.out.println("[ShopHighlighter] Deactivating...");
         active = false;
         snapshotTimestamps.clear();
         pendingBoxes.clear();
@@ -107,7 +102,7 @@ public class ShopHighlighter implements ClientModInitializer {
     // ---------------------------------------------------------------------
 
     private static boolean warpMatches(String warpColumn, String currentWarp) {
-        System.out.println("[ShopHighlighter] Comparing CSV warp: '" + warpColumn + "' with input: '" + currentWarp + "'"); // Debug log
+        System.out.println("[ShopHighlighter] Comparing CSV warp: '" + warpColumn + "' with input: '" + currentWarp + "'");
         if (warpColumn.isBlank() || warpColumn.equals("?")) {
             System.out.println("[ShopHighlighter] Warp column is blank or '?', skipping.");
             return false;
@@ -123,7 +118,7 @@ public class ShopHighlighter implements ClientModInitializer {
 
         // Compare with currentWarp (case-insensitive)
         boolean matches = bareWarp.equalsIgnoreCase(currentWarp.trim());
-        System.out.println("[ShopHighlighter] Stripped CSV warp: '" + bareWarp + "', matches: " + matches); // Debug log
+        System.out.println("[ShopHighlighter] Stripped CSV warp: '" + bareWarp + "', matches: " + matches);
         return matches;
     }
 
@@ -136,7 +131,6 @@ public class ShopHighlighter implements ClientModInitializer {
         if (++tickCounter < RECHECK_INTERVAL_TICKS) return;
         tickCounter = 0;
 
-        System.out.println("[ShopHighlighter] Rechecking CSV for changes..."); // Debug log
         for (String[] row : readAllRows()) {
             if (row.length == 0) continue;
 
@@ -179,20 +173,90 @@ public class ShopHighlighter implements ClientModInitializer {
             loggedThisActivation = true;
         }
 
-        List<Box> boxes = new ArrayList<>(pendingBoxes.size());
-        for (BlockPos pos : pendingBoxes.values()) {
-            // Adjust the box position by +0.5 in X, Y, and Z to center it on the block
-            boxes.add(new Box(
-                    pos.getX() - 0.5 + 0.5,  // X: Shift by +0.5
-                    pos.getY() - 0.5 + 0.5,  // Y: Shift by +0.5
-                    pos.getZ() - 0.5 + 0.5,  // Z: Shift by +0.5
-                    pos.getX() + 0.5 + 0.5,  // X: Shift by +0.5
-                    pos.getY() + 0.5 + 0.5,  // Y: Shift by +0.5
-                    pos.getZ() + 0.5 + 0.5   // Z: Shift by +0.5
-            ));
+        // Find the oldest and newest timestamps
+        long oldestTimestamp = Long.MAX_VALUE;
+        long newestTimestamp = 0;
+        for (String timestamp : snapshotTimestamps.values()) {
+            try {
+                long ts = Long.parseLong(timestamp);
+                if (ts < oldestTimestamp) oldestTimestamp = ts;
+                if (ts > newestTimestamp) newestTimestamp = ts;
+            } catch (NumberFormatException e) {
+                // Skip invalid timestamps
+            }
         }
 
-        RenderUtils.drawOutlinedBoxes(matrices, boxes, LINE_COLOR, DEPTH_TEST);
+        // If all timestamps are the same, use the default color
+        if (oldestTimestamp == newestTimestamp) {
+            List<Box> boxes = new ArrayList<>(pendingBoxes.size());
+            for (BlockPos pos : pendingBoxes.values()) {
+                boxes.add(new Box(
+                        pos.getX() - 0.5 + 0.5,
+                        pos.getY() - 0.5 + 0.5,
+                        pos.getZ() - 0.5 + 0.5,
+                        pos.getX() + 0.5 + 0.5,
+                        pos.getY() + 0.5 + 0.5,
+                        pos.getZ() + 0.5 + 0.5
+                ));
+            }
+            RenderUtils.drawOutlinedBoxes(matrices, boxes, LINE_COLOR, DEPTH_TEST);
+            return;
+        }
+
+        // Group boxes by color based on timestamp
+        Map<Integer, List<Box>> colorToBoxes = new LinkedHashMap<>();
+        for (Map.Entry<String, BlockPos> entry : pendingBoxes.entrySet()) {
+            String location = entry.getKey();
+            BlockPos pos = entry.getValue();
+            String timestampStr = snapshotTimestamps.get(location);
+
+            try {
+                long timestamp = Long.parseLong(timestampStr);
+                // Calculate the gradient ratio (0.0 = oldest/red, 1.0 = newest/green)
+                float ratio = (float) (timestamp - oldestTimestamp) / (newestTimestamp - oldestTimestamp);
+                ratio = Math.max(0.0f, Math.min(1.0f, ratio)); // Clamp to [0, 1]
+
+                // Interpolate between red and green
+                int red = 255;
+                int green = 0;
+                int blue = 0;
+
+                // Red to green gradient
+                green = (int) (255 * ratio);
+                red = (int) (255 * (1.0f - ratio));
+
+                int color = ColorUtils.createArgb(255, red, green, blue);
+
+                // Create the box with adjusted position
+                Box box = new Box(
+                        pos.getX() - 0.5 + 0.5,
+                        pos.getY() - 0.5 + 0.5,
+                        pos.getZ() - 0.5 + 0.5,
+                        pos.getX() + 0.5 + 0.5,
+                        pos.getY() + 0.5 + 0.5,
+                        pos.getZ() + 0.5 + 0.5
+                );
+
+                // Add the box to the appropriate color group
+                colorToBoxes.computeIfAbsent(color, k -> new ArrayList<>()).add(box);
+            } catch (NumberFormatException e) {
+                // Skip invalid timestamps and use default color
+                Box box = new Box(
+                        pos.getX() - 0.5 + 0.5,
+                        pos.getY() - 0.5 + 0.5,
+                        pos.getZ() - 0.5 + 0.5,
+                        pos.getX() + 0.5 + 0.5,
+                        pos.getY() + 0.5 + 0.5,
+                        pos.getZ() + 0.5 + 0.5
+                );
+                colorToBoxes.computeIfAbsent(LINE_COLOR, k -> new ArrayList<>()).add(box);
+            }
+        }
+
+        // Render boxes for each color group
+        for (Map.Entry<Integer, List<Box>> entry : colorToBoxes.entrySet()) {
+            RenderUtils.drawOutlinedBoxes(matrices, entry.getValue(), entry.getKey(), DEPTH_TEST);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -202,11 +266,10 @@ public class ShopHighlighter implements ClientModInitializer {
     private static List<String[]> readAllRows() {
         List<String[]> rows = new ArrayList<>();
         if (!Files.exists(CSV_FILE)) {
-            System.err.println("[ShopHighlighter] CSV file does not exist at: " + CSV_FILE); // Debug log
+            System.err.println("[ShopHighlighter] CSV file does not exist at: " + CSV_FILE);
             return rows;
         }
 
-        System.out.println("[ShopHighlighter] Reading CSV file at: " + CSV_FILE); // Debug log
         try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {
             String line;
             boolean isHeader = true;
