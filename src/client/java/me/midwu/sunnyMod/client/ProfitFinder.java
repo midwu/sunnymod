@@ -389,6 +389,31 @@ public final class ProfitFinder {
         return out;
     }
 
+    // New public method to read all rows from shop_data.csv
+    public static List<String[]> readAllShopDataRows() {
+        List<String[]> rows = new ArrayList<>();
+        if (!Files.exists(SHOP_DATA)) {
+            System.err.println("[ProfitFinder] shop_data.csv not found!");
+            return rows;
+        }
+
+        try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA)) {
+            String line;
+            boolean isHeader = true;
+            while ((line = reader.readLine()) != null) {
+                if (isHeader) {
+                    isHeader = false;
+                    continue;
+                }
+                if (line.isBlank()) continue;
+                rows.add(parseCsvLine(line));
+            }
+        } catch (Exception e) {
+            System.err.println("[ProfitFinder] Failed to read shop_data.csv: " + e.getMessage());
+        }
+        return rows;
+    }
+
     private static Result findInternal(boolean selfFlip, double minProfitPerItem,
                                        double minTotalProfit, int limit, double maxAgeHours) {
         if (!Files.exists(SHOP_DATA)) {
@@ -604,7 +629,8 @@ public final class ProfitFinder {
         return 0;
     }
 
-    private static String strip(String s) {
+    // Changed from private to public
+    public static String strip(String s) {
         if (s == null) return "";
         return s.replaceAll("§.", "").trim();
     }
