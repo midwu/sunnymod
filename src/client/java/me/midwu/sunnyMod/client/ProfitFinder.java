@@ -112,6 +112,39 @@ public final class ProfitFinder {
         }
     }
 
+    /** One raw row from shop_data.csv, exposed for the Search tab (independent of the flip-finding logic). */
+    public static final class ShopEntry {
+        public final String location;
+        public final String owner;
+        public final String item;
+        public final String stockSpace;
+        public final double price;
+        public final String action;   // raw shop_data.csv value: "SELLING" or "BUYING"
+        public final String status;   // "Active", "out of stock", "out of space", ...
+        public final String warp;
+        public final long epochMs;
+        public final int noChangeStreak;
+
+        ShopEntry(String location, String owner, String item, String stockSpace, double price,
+                  String action, String status, String warp, long epochMs, int noChangeStreak) {
+            this.location = location != null ? location : "";
+            this.owner = owner != null ? owner : "";
+            this.item = item != null ? item : "";
+            this.stockSpace = stockSpace != null ? stockSpace : "";
+            this.price = price;
+            this.action = action != null ? action : "";
+            this.status = status != null ? status : "";
+            this.warp = warp != null ? warp : "";
+            this.epochMs = epochMs;
+            this.noChangeStreak = noChangeStreak;
+        }
+
+        /** Hours since this row was last scanned, or -1 if unknown. */
+        public double ageHours() {
+            return epochMs > 0 ? (System.currentTimeMillis() - epochMs) / 3_600_000.0 : -1;
+        }
+    }
+
     /** A non-Active (out of stock / out of space) listing worth re-visiting, ranked by estimated payoff. */
     public static final class WarpPriority {
         public final String warp;
@@ -264,6 +297,77 @@ public final class ProfitFinder {
     }
 
     /**
+     * Free-text search across the raw shop_data.csv, powering the Search tab in ProfitScreen (F8).
+     * Matching is a case-insensitive substring match against the item name, so "ancient" finds
+     * "Ancient Debris" (and anything else containing "ancient"), and "spawner" finds every
+     * spawner variant.
+     *
+     * @param query      substring to match against the item name; blank/null matches every item
+     * @param wantToBuy  true  = "I want to buy this" -> shops SELLING the item, sorted cheapest first.
+     *                   false = "I want to sell this" -> shops BUYING the item, sorted best price
+     *                   (most money made from selling) first.
+     * @param activeOnly true  = only "Active" listings.
+     *                   false = only non-Active listings ("out of stock" / "out of space" / etc).
+     */
+    public static List<ShopEntry> searchShopData(String query, boolean wantToBuy, boolean activeOnly) {
+        List<ShopEntry> out = new ArrayList<>();
+        if (!Files.exists(SHOP_DATA)) return out;
+
+        String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
+        String wantAction = wantToBuy ? "SELLING" : "BUYING";
+
+        try (BufferedReader br = Files.newBufferedReader(SHOP_DATA)) {
+            String header = br.readLine();
+            if (header == null) return out;
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.isBlank()) continue;
+                String[] p = parseCsvLine(line);
+                if (p.length < 7) continue;
+
+                String location = p[0].trim();
+                String owner = p[1].trim();
+                String item = strip(p[2]);
+                String stockSpace = p[3].trim();
+                String action = p[5].trim();
+                String status = p[6].trim();
+                String timestamp = p.length > 7 ? p[7].trim() : "";
+                String warp = p.length > 8 ? p[8].trim() : "";
+                int noChangeStreak = p.length > 9 ? parseIntSafe(p[9].trim(), 0) : 0;
+
+                if (item.isEmpty()) continue;
+                if (!wantAction.equalsIgnoreCase(action)) continue;
+
+                boolean isActive = "Active".equalsIgnoreCase(status);
+                if (activeOnly != isActive) continue;
+
+                if (!needle.isEmpty() && !item.toLowerCase(Locale.ROOT).contains(needle)) continue;
+
+                double price;
+                try {
+                    price = Double.parseDouble(p[4].replace(",", "").replace("$", "").trim());
+                } catch (NumberFormatException e) {
+                    continue;
+                }
+                if (price < 0) continue;
+
+                long epochMs = parseTimestampMs(timestamp);
+                out.add(new ShopEntry(location, owner, item, stockSpace, price, action, status,
+                        warp, epochMs, noChangeStreak));
+            }
+        } catch (Exception e) {
+            return out;
+        }
+
+        if (wantToBuy) {
+            out.sort(Comparator.comparingDouble((ShopEntry e) -> e.price)); // cheapest first
+        } else {
+            out.sort(Comparator.comparingDouble((ShopEntry e) -> e.price).reversed()); // most money first
+        }
+        return out;
+    }
+
+    /**
      * Shops sitting at "out of stock" / "out of space" — invisible to findFlips/findSelfFlips —
      * ranked by how worth re-visiting they are: estimated payoff if restocked, weighted by
      * staleness, and faded out the more times in a row a rescan has found nothing new.
@@ -387,31 +491,6 @@ public final class ProfitFinder {
 
         out.sort(Comparator.comparingDouble(WarpSummary::priority).reversed());
         return out;
-    }
-
-    // New public method to read all rows from shop_data.csv
-    public static List<String[]> readAllShopDataRows() {
-        List<String[]> rows = new ArrayList<>();
-        if (!Files.exists(SHOP_DATA)) {
-            System.err.println("[ProfitFinder] shop_data.csv not found!");
-            return rows;
-        }
-
-        try (BufferedReader reader = Files.newBufferedReader(SHOP_DATA)) {
-            String line;
-            boolean isHeader = true;
-            while ((line = reader.readLine()) != null) {
-                if (isHeader) {
-                    isHeader = false;
-                    continue;
-                }
-                if (line.isBlank()) continue;
-                rows.add(parseCsvLine(line));
-            }
-        } catch (Exception e) {
-            System.err.println("[ProfitFinder] Failed to read shop_data.csv: " + e.getMessage());
-        }
-        return rows;
     }
 
     private static Result findInternal(boolean selfFlip, double minProfitPerItem,
@@ -629,8 +708,7 @@ public final class ProfitFinder {
         return 0;
     }
 
-    // Changed from private to public
-    public static String strip(String s) {
+    private static String strip(String s) {
         if (s == null) return "";
         return s.replaceAll("§.", "").trim();
     }
