@@ -30,7 +30,6 @@ public class ProfitScreen extends Screen {
     private static final int FLIPS_PROFIT_COL_WIDTH = 140;  // Width of the Profit column in Flips mode
     private static final int FLIPS_WARPS_COL_WIDTH = 210; // Width of the Warps column in Flips mode
     private static final int FLIPS_WARP_BTN_W = 140;      // Width of warp buttons in Flips mode
-    private static final int FLIPS_ITEM_NAME_MAX_CHARS = 12;    // Max characters for item names in Flips mode
     private static final int FLIPS_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Flips mode
 
     // --- SELF-FLIP PAGE VARIABLES ---
@@ -38,7 +37,6 @@ public class ProfitScreen extends Screen {
     private static final int SELF_OWNER_COL_WIDTH = 280; // Width of the Owner column in Self-Flip mode
     private static final int SELF_PROFIT_COL_WIDTH = 240;  // Width of the Margin column in Self-Flip mode
     private static final int SELF_WARP_BTN_W = 180;      // Width of warp button in Self-Flip mode
-    private static final int SELF_ITEM_NAME_MAX_CHARS = 24;    // Max characters for item names in Self-Flip mode
     private static final int SELF_OWNER_NAME_MAX_CHARS = 40;   // Max characters for owner names in Self-Flip mode
     private static final int SELF_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Self-Flip mode
 
@@ -450,26 +448,43 @@ public class ProfitScreen extends Screen {
         client.player.networkHandler.sendChatCommand(cmd);
     }
 
-    /** Same as runWarpCommand, but also lights up the shop_data.csv coord boxes.
-     *  Only the Update tab's warp buttons should call this one. */
+    /** Same as runWarpCommand, but also lights up every shop_data.csv coord box at that warp.
+     *  Used by the Update tab, where one row summarizes a whole warp's worth of stale listings. */
     private void runWarpCommandAndHighlight(String warp) {
         System.out.println("[ProfitScreen] Running warp command and highlighting for warp: " + warp);
         runWarpCommand(warp);
 
-        // Strip "/warp " or "/home " prefixes to get the warp name
+        // Activate the highlighter for every shop at the current warp
+        ShopHighlighter.activateForCurrentShopData(stripWarpPrefix(warp));
+
+        // Close the screen after warping
+        this.close();
+    }
+
+    /** Same as runWarpCommandAndHighlight, but only lights up the specific shop location(s) given,
+     *  instead of every shop at the warp. Used by the Flips/Self-flip warp buttons, where each row
+     *  is one specific seller/buyer shop, not the whole warp. */
+    private void runWarpCommandAndHighlightLocations(String warp, List<String> locations) {
+        System.out.println("[ProfitScreen] Running warp command and highlighting locations "
+                + locations + " for warp: " + warp);
+        runWarpCommand(warp);
+
+        // Activate the highlighter for just the given shop location(s)
+        ShopHighlighter.activateForLocations(stripWarpPrefix(warp), locations);
+
+        // Close the screen after warping
+        this.close();
+    }
+
+    /** Strips a leading "/warp " or "/home " so callers are left with just the warp/home name. */
+    private static String stripWarpPrefix(String warp) {
         String currentWarp = warp;
         if (currentWarp.startsWith("/warp ")) {
             currentWarp = currentWarp.substring(6);
         } else if (currentWarp.startsWith("/home ")) {
             currentWarp = currentWarp.substring(6);
         }
-        System.out.println("[ProfitScreen] Stripped warp name: " + currentWarp);
-
-        // Activate the highlighter for the current warp
-        ShopHighlighter.activateForCurrentShopData(currentWarp);
-
-        // Close the screen after warping
-        this.close();
+        return currentWarp;
     }
 
     @Override
@@ -520,7 +535,6 @@ public class ProfitScreen extends Screen {
         int profitColWidth = (mode == Mode.SELF) ? SELF_PROFIT_COL_WIDTH : FLIPS_PROFIT_COL_WIDTH;
         int warpsColWidth = (mode == Mode.SELF) ? 0 : FLIPS_WARPS_COL_WIDTH;
         int warpBtnW = (mode == Mode.SELF) ? SELF_WARP_BTN_W : FLIPS_WARP_BTN_W;
-        int itemNameMaxChars = (mode == Mode.SELF) ? SELF_ITEM_NAME_MAX_CHARS : FLIPS_ITEM_NAME_MAX_CHARS;
         int warpNameMaxChars = (mode == Mode.SELF) ? SELF_WARP_NAME_MAX_CHARS : FLIPS_WARP_NAME_MAX_CHARS;
 
         ctx.drawText(textRenderer, "Item", PAD, hy, 0xFF666666, false);
@@ -557,7 +571,8 @@ public class ProfitScreen extends Screen {
                 hovered = t;
             }
 
-            String name = t.item.length() > itemNameMaxChars ? t.item.substring(0, itemNameMaxChars - 1) + "…" : t.item;
+            // Full item name, never truncated/capped.
+            String name = t.item;
             ctx.drawText(textRenderer, name, PAD, rowY + 2, 0xFFFFFFAA, false);
 
             if (mode == Mode.SELF) {
@@ -572,7 +587,8 @@ public class ProfitScreen extends Screen {
                 if (!t.sellerWarp.isBlank()) {
                     ButtonWidget sellerWarpBtn = ButtonWidget.builder(
                                     Text.literal(sellerWarpLabel),
-                                    b -> runWarpCommand(t.sellerWarp)
+                                    b -> runWarpCommandAndHighlightLocations(
+                                            t.sellerWarp, List.of(t.sellerLocation, t.buyerLocation))
                             ).dimensions(warpBtnX, rowY, warpBtnW, 16)
                             .tooltip(Tooltip.of(Text.literal("Warp to: " + t.sellerWarp)))
                             .build();
@@ -591,7 +607,8 @@ public class ProfitScreen extends Screen {
                 if (!t.sellerWarp.isBlank()) {
                     ButtonWidget sellerWarpBtn = ButtonWidget.builder(
                                     Text.literal(sellerWarpLabel),
-                                    b -> runWarpCommand(t.sellerWarp)
+                                    b -> runWarpCommandAndHighlightLocations(
+                                            t.sellerWarp, List.of(t.sellerLocation))
                             ).dimensions(warpBtnX - warpBtnW - 5, rowY, warpBtnW, 16)
                             .tooltip(Tooltip.of(Text.literal("Warp to seller: " + t.sellerWarp)))
                             .build();
@@ -601,7 +618,8 @@ public class ProfitScreen extends Screen {
                 if (!t.buyerWarp.isBlank()) {
                     ButtonWidget buyerWarpBtn = ButtonWidget.builder(
                                     Text.literal(buyerWarpLabel),
-                                    b -> runWarpCommand(t.buyerWarp)
+                                    b -> runWarpCommandAndHighlightLocations(
+                                            t.buyerWarp, List.of(t.buyerLocation))
                             ).dimensions(warpBtnX, rowY, warpBtnW, 16)
                             .tooltip(Tooltip.of(Text.literal("Warp to buyer: " + t.buyerWarp)))
                             .build();

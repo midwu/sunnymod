@@ -15,9 +15,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class ShopHighlighter implements ClientModInitializer {
 
@@ -87,6 +89,56 @@ public class ShopHighlighter implements ClientModInitializer {
         tickCounter = 0;
 
         System.out.println("[ShopHighlighter] Matched " + pendingBoxes.size() + " shop(s) for warp '" + currentWarp + "'. active=" + active);
+    }
+
+    /**
+     * Like {@link #activateForCurrentShopData}, but only highlights the exact shop location(s)
+     * given, instead of every shop at the warp. Used by the Flips/Self-flip warp buttons, where
+     * each row is one specific seller/buyer shop rather than a whole warp's worth of listings.
+     */
+    public static void activateForLocations(String currentWarp, List<String> locations) {
+        System.out.println("[ShopHighlighter] activateForLocations called with warp: " + currentWarp
+                + ", locations: " + locations);
+        snapshotTimestamps.clear();
+        pendingBoxes.clear();
+
+        Set<String> wanted = new HashSet<>();
+        if (locations != null) {
+            for (String loc : locations) {
+                if (loc != null && !loc.isBlank()) wanted.add(loc.trim());
+            }
+        }
+
+        if (wanted.isEmpty()) {
+            System.out.println("[ShopHighlighter] No valid locations given, deactivating.");
+            active = false;
+            return;
+        }
+
+        List<String[]> rows = readAllRows();
+        for (String[] row : rows) {
+            if (row.length == 0) continue;
+
+            String location = row[0].trim();
+            if (location.isBlank() || !wanted.contains(location)) continue;
+
+            BlockPos pos = parseLocation(location);
+            if (pos == null) {
+                System.err.println("[ShopHighlighter] Failed to parse location: " + location);
+                continue;
+            }
+
+            String timestamp = row.length > 7 ? row[7].trim() : "";
+            snapshotTimestamps.put(location, timestamp);
+            pendingBoxes.put(location, pos);
+            System.out.println("[ShopHighlighter] Added box at: " + pos);
+        }
+
+        active = !pendingBoxes.isEmpty();
+        tickCounter = 0;
+
+        System.out.println("[ShopHighlighter] Matched " + pendingBoxes.size() + "/" + wanted.size()
+                + " requested location(s) for warp '" + currentWarp + "'. active=" + active);
     }
 
     public static void deactivate() {
