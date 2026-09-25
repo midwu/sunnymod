@@ -77,7 +77,7 @@ public class Container_reader implements ClientModInitializer {
     // automatically whenever ServerShopLogger (or anything else) writes a
     // newer version of the file.
     /** All BUYING offers per item name, each list sorted by price descending. */
-    private static Map<String, List<BestBuyOffer>> bestBuyOfferCache = null;
+    private static Map<String, java.util.List<BestBuyOffer>> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
 
     // Last load diagnostics (filled by getAllBuyOffers, shown on F7).
@@ -124,30 +124,30 @@ public class Container_reader implements ClientModInitializer {
      * Server shop data is always stored under the vanilla name; we only hit it
      * when the stack itself is plain (or the player shop used the vanilla name).
      */
-    static List<BestBuyOffer> lookupOffers(
-            Map<String, List<BestBuyOffer>> all,
+    static java.util.List<BestBuyOffer> lookupOffers(
+            Map<String, java.util.List<BestBuyOffer>> all,
             String displayName,
             String vanillaName) {
         String display = stripFormatting(displayName);
         String vanilla = stripFormatting(vanillaName);
-        if (display.isEmpty() && vanilla.isEmpty()) return List.of();
+        if (display.isEmpty() && vanilla.isEmpty()) return java.util.List.of();
 
         boolean plain = display.isEmpty() || display.equalsIgnoreCase(vanilla);
         if (!plain) {
-            List<BestBuyOffer> byDisplay = all.get(display);
+            java.util.List<BestBuyOffer> byDisplay = all.get(display);
             if (byDisplay != null && !byDisplay.isEmpty()) return byDisplay;
             for (var e : all.entrySet()) {
                 if (e.getKey().equalsIgnoreCase(display)) return e.getValue();
             }
-            return List.of();
+            return java.util.List.of();
         }
         String key = !vanilla.isEmpty() ? vanilla : display;
-        List<BestBuyOffer> list = all.get(key);
+        java.util.List<BestBuyOffer> list = all.get(key);
         if (list != null && !list.isEmpty()) return list;
         for (var e : all.entrySet()) {
             if (e.getKey().equalsIgnoreCase(key)) return e.getValue();
         }
-        return List.of();
+        return java.util.List.of();
     }
 
     /** Single best offer (for AH compare). Same display-vs-vanilla rules. */
@@ -237,7 +237,7 @@ public class Container_reader implements ClientModInitializer {
                                     "§a[F8] §7Ignore lists — edit Players / Warps / Items"), false);
                         }
                         client.setScreen(new ProfitScreen(
-                                new ProfitFinder.Result(List.of(), 0, 0, 0, "ignore mode", false)));
+                                new ProfitFinder.Result(java.util.List.of(), 0, 0, 0, "ignore mode", false)));
                     } else {
                         ProfitFinder.Result r = ProfitScreen.runFind();
                         if (client.player != null) {
@@ -459,7 +459,7 @@ public class Container_reader implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        Map<String, List<BestBuyOffer>> allOffers = getAllBuyOffers();
+        Map<String, java.util.List<BestBuyOffer>> allOffers = getAllBuyOffers();
 
         double total = 0.0;
         int pricedStacks = 0;
@@ -569,7 +569,7 @@ public class Container_reader implements ClientModInitializer {
             String displayLabel,
             int count,
             String lookupName,
-            Map<String, List<BestBuyOffer>> allOffers,
+            Map<String, java.util.List<BestBuyOffer>> allOffers,
             List<String> missingItems) {
         return allocateItem(entries, displayLabel, count, lookupName, lookupName, allOffers, missingItems);
     }
@@ -580,10 +580,10 @@ public class Container_reader implements ClientModInitializer {
             int count,
             String displayName,
             String vanillaName,
-            Map<String, List<BestBuyOffer>> allOffers,
+            Map<String, java.util.List<BestBuyOffer>> allOffers,
             List<String> missingItems) {
         if (count <= 0) return new double[]{0, 0, 0};
-        List<BestBuyOffer> offers = lookupOffers(allOffers, displayName, vanillaName);
+        java.util.List<BestBuyOffer> offers = lookupOffers(allOffers, displayName, vanillaName);
         if (offers.isEmpty()) {
             if (missingItems.size() < 6) missingItems.add(displayLabel);
             entries.add(ContainerWorthHud.Entry.unsellable(displayLabel, count));
@@ -622,7 +622,7 @@ public class Container_reader implements ClientModInitializer {
      * sorted by price descending. Deduplicated by owner+warp+location
      * (keeps the higher price). Used for stock-aware multi-shop allocation.
      */
-    private static Map<String, List<BestBuyOffer>> getAllBuyOffers() {
+    private static Map<String, java.util.List<BestBuyOffer>> getAllBuyOffers() {
         try {
             boolean exists = Files.exists(SHOP_DATA_FILE);
             long modTime = exists ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1L;
@@ -635,7 +635,7 @@ public class Container_reader implements ClientModInitializer {
 
             if (!exists) {
                 lastLoadSummary = "shop_data.csv §cMISSING§7 — expected at config/sunnyMod/";
-                Map<String, List<BestBuyOffer>> empty = new HashMap<>();
+                Map<String, java.util.List<BestBuyOffer>> empty = new HashMap<>();
                 bestBuyOfferCache = empty;
                 cachedFileModTime = modTime;
                 return empty;
@@ -691,9 +691,9 @@ public class Container_reader implements ClientModInitializer {
                 }
             }
 
-            Map<String, List<BestBuyOffer>> offers = new HashMap<>();
+            Map<String, java.util.List<BestBuyOffer>> offers = new HashMap<>();
             for (Map.Entry<String, Map<String, BestBuyOffer>> e : byItem.entrySet()) {
-                List<BestBuyOffer> list = new ArrayList<>(e.getValue().values());
+                java.util.List<BestBuyOffer> list = new ArrayList<>(e.getValue().values());
                 list.sort((a, b) -> Double.compare(b.price, a.price));
                 offers.put(e.getKey(), list);
             }

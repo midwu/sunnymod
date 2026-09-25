@@ -146,6 +146,15 @@ public final class WarpData {
         return new ArrayList<>(loadMap().values());
     }
 
+    /**
+     * Re-read both warp_data.csv and shop_data.csv and rebuild the comparison.
+     * This is intentionally uncached so the F9 Refresh button always sees
+     * newly written shop_data.csv rows immediately.
+     */
+    public static List<WarpRow> refreshComparison() {
+        return buildRows();
+    }
+
     public static List<WarpRow> buildRows() {
         Map<String, WarpEntry> publicWarps = loadMap();
         Map<String, ShopWarp> shopWarps = loadShopWarps();
