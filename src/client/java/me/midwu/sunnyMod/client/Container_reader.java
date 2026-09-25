@@ -69,6 +69,7 @@ public class Container_reader implements ClientModInitializer {
     private static boolean wasF5Down = false;
     private static boolean wasF7Down = false;
     private static boolean wasF8Down = false;
+    private static boolean wasF9Down = false;
 
     // Cache for the F7 valuation lookup, keyed off shop_data.csv's
     // last-modified time so repeated F7 presses in the same session don't
@@ -76,7 +77,7 @@ public class Container_reader implements ClientModInitializer {
     // automatically whenever ServerShopLogger (or anything else) writes a
     // newer version of the file.
     /** All BUYING offers per item name, each list sorted by price descending. */
-    private static Map<String, java.util.List<BestBuyOffer>> bestBuyOfferCache = null;
+    private static Map<String, List<BestBuyOffer>> bestBuyOfferCache = null;
     private static long cachedFileModTime = -1;
 
     // Last load diagnostics (filled by getAllBuyOffers, shown on F7).
@@ -123,30 +124,30 @@ public class Container_reader implements ClientModInitializer {
      * Server shop data is always stored under the vanilla name; we only hit it
      * when the stack itself is plain (or the player shop used the vanilla name).
      */
-    static java.util.List<BestBuyOffer> lookupOffers(
-            Map<String, java.util.List<BestBuyOffer>> all,
+    static List<BestBuyOffer> lookupOffers(
+            Map<String, List<BestBuyOffer>> all,
             String displayName,
             String vanillaName) {
         String display = stripFormatting(displayName);
         String vanilla = stripFormatting(vanillaName);
-        if (display.isEmpty() && vanilla.isEmpty()) return java.util.List.of();
+        if (display.isEmpty() && vanilla.isEmpty()) return List.of();
 
         boolean plain = display.isEmpty() || display.equalsIgnoreCase(vanilla);
         if (!plain) {
-            java.util.List<BestBuyOffer> byDisplay = all.get(display);
+            List<BestBuyOffer> byDisplay = all.get(display);
             if (byDisplay != null && !byDisplay.isEmpty()) return byDisplay;
             for (var e : all.entrySet()) {
                 if (e.getKey().equalsIgnoreCase(display)) return e.getValue();
             }
-            return java.util.List.of();
+            return List.of();
         }
         String key = !vanilla.isEmpty() ? vanilla : display;
-        java.util.List<BestBuyOffer> list = all.get(key);
+        List<BestBuyOffer> list = all.get(key);
         if (list != null && !list.isEmpty()) return list;
         for (var e : all.entrySet()) {
             if (e.getKey().equalsIgnoreCase(key)) return e.getValue();
         }
-        return java.util.List.of();
+        return List.of();
     }
 
     /** Single best offer (for AH compare). Same display-vs-vanilla rules. */
@@ -236,7 +237,7 @@ public class Container_reader implements ClientModInitializer {
                                     "§a[F8] §7Ignore lists — edit Players / Warps / Items"), false);
                         }
                         client.setScreen(new ProfitScreen(
-                                new ProfitFinder.Result(java.util.List.of(), 0, 0, 0, "ignore mode", false)));
+                                new ProfitFinder.Result(List.of(), 0, 0, 0, "ignore mode", false)));
                     } else {
                         ProfitFinder.Result r = ProfitScreen.runFind();
                         if (client.player != null) {
@@ -249,6 +250,27 @@ public class Container_reader implements ClientModInitializer {
                 }
             }
             wasF8Down = isF8Down;
+
+            // F9 — Public Warps scanner / in-game warp data viewer
+            boolean isF9Down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F9) == GLFW.GLFW_PRESS;
+            if (isF9Down && !wasF9Down) {
+                if (client.currentScreen instanceof HandledScreen<?> handledScreen) {
+                    if (WarpData.isPublicWarps(handledScreen)) {
+                        int updated = WarpData.updateFromContainer(handledScreen);
+                        if (client.player != null) {
+                            client.player.sendMessage(Text.literal(
+                                    "§a[F9] §fUpdated " + updated + " warp entr" +
+                                            (updated == 1 ? "y" : "ies") + " → §fwarp_data.csv"), false);
+                        }
+                    } else if (client.player != null) {
+                        client.player.sendMessage(Text.literal(
+                                "§e[F9] §7Open the §fPublic Warps§7 menu to scan warps."), false);
+                    }
+                } else if (!(client.currentScreen instanceof WarpDataScreen)) {
+                    client.setScreen(new WarpDataScreen());
+                }
+            }
+            wasF9Down = isF9Down;
         });
     }
 
@@ -437,7 +459,7 @@ public class Container_reader implements ClientModInitializer {
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.player == null) return;
 
-        Map<String, java.util.List<BestBuyOffer>> allOffers = getAllBuyOffers();
+        Map<String, List<BestBuyOffer>> allOffers = getAllBuyOffers();
 
         double total = 0.0;
         int pricedStacks = 0;
@@ -547,7 +569,7 @@ public class Container_reader implements ClientModInitializer {
             String displayLabel,
             int count,
             String lookupName,
-            Map<String, java.util.List<BestBuyOffer>> allOffers,
+            Map<String, List<BestBuyOffer>> allOffers,
             List<String> missingItems) {
         return allocateItem(entries, displayLabel, count, lookupName, lookupName, allOffers, missingItems);
     }
@@ -558,10 +580,10 @@ public class Container_reader implements ClientModInitializer {
             int count,
             String displayName,
             String vanillaName,
-            Map<String, java.util.List<BestBuyOffer>> allOffers,
+            Map<String, List<BestBuyOffer>> allOffers,
             List<String> missingItems) {
         if (count <= 0) return new double[]{0, 0, 0};
-        java.util.List<BestBuyOffer> offers = lookupOffers(allOffers, displayName, vanillaName);
+        List<BestBuyOffer> offers = lookupOffers(allOffers, displayName, vanillaName);
         if (offers.isEmpty()) {
             if (missingItems.size() < 6) missingItems.add(displayLabel);
             entries.add(ContainerWorthHud.Entry.unsellable(displayLabel, count));
@@ -600,7 +622,7 @@ public class Container_reader implements ClientModInitializer {
      * sorted by price descending. Deduplicated by owner+warp+location
      * (keeps the higher price). Used for stock-aware multi-shop allocation.
      */
-    private static Map<String, java.util.List<BestBuyOffer>> getAllBuyOffers() {
+    private static Map<String, List<BestBuyOffer>> getAllBuyOffers() {
         try {
             boolean exists = Files.exists(SHOP_DATA_FILE);
             long modTime = exists ? Files.getLastModifiedTime(SHOP_DATA_FILE).toMillis() : -1L;
@@ -613,7 +635,7 @@ public class Container_reader implements ClientModInitializer {
 
             if (!exists) {
                 lastLoadSummary = "shop_data.csv §cMISSING§7 — expected at config/sunnyMod/";
-                Map<String, java.util.List<BestBuyOffer>> empty = new HashMap<>();
+                Map<String, List<BestBuyOffer>> empty = new HashMap<>();
                 bestBuyOfferCache = empty;
                 cachedFileModTime = modTime;
                 return empty;
@@ -669,9 +691,9 @@ public class Container_reader implements ClientModInitializer {
                 }
             }
 
-            Map<String, java.util.List<BestBuyOffer>> offers = new HashMap<>();
+            Map<String, List<BestBuyOffer>> offers = new HashMap<>();
             for (Map.Entry<String, Map<String, BestBuyOffer>> e : byItem.entrySet()) {
-                java.util.List<BestBuyOffer> list = new ArrayList<>(e.getValue().values());
+                List<BestBuyOffer> list = new ArrayList<>(e.getValue().values());
                 list.sort((a, b) -> Double.compare(b.price, a.price));
                 offers.put(e.getKey(), list);
             }

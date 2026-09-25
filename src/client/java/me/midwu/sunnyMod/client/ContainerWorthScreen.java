@@ -227,9 +227,9 @@ public class ContainerWorthScreen extends Screen {
      */
     static String formatQty(ContainerWorthHud.Entry e) {
         if (e.count == e.containerTotal) {
-            return String.format(java.util.Locale.US, "%,d", e.count);
+            return String.format(Locale.US, "%,d", e.count);
         }
-        return String.format(java.util.Locale.US, "%,d / %,d", e.count, e.containerTotal);
+        return String.format(Locale.US, "%,d / %,d", e.count, e.containerTotal);
     }
 
     static List<Text> qtyTooltip(ContainerWorthHud.Entry e) {
@@ -237,25 +237,25 @@ public class ContainerWorthScreen extends Screen {
         int stacks = e.count / STACK_SIZE;
         int rem = e.count % STACK_SIZE;
         if (stacks > 0 && rem > 0) {
-            lines.add(Text.literal(String.format(java.util.Locale.US,
+            lines.add(Text.literal(String.format(Locale.US,
                     "This leg: %,d = %d stack(s) + %d", e.count, stacks, rem)));
         } else if (stacks > 0) {
-            lines.add(Text.literal(String.format(java.util.Locale.US,
+            lines.add(Text.literal(String.format(Locale.US,
                     "This leg: %,d = %d stack(s)", e.count, stacks)));
         } else {
-            lines.add(Text.literal(String.format(java.util.Locale.US,
+            lines.add(Text.literal(String.format(Locale.US,
                     "This leg: %,d item(s)", e.count)));
         }
 
         if (e.containerTotal != e.count) {
-            lines.add(Text.literal(String.format(java.util.Locale.US,
+            lines.add(Text.literal(String.format(Locale.US,
                     "Chest total for %s: %,d", e.name, e.containerTotal)));
         }
 
         if (e.unitPrice == null) {
             lines.add(Text.literal("No more shops with buy-space — unsellable leftover"));
         } else if (e.shopSpace >= 0) {
-            lines.add(Text.literal(String.format(java.util.Locale.US,
+            lines.add(Text.literal(String.format(Locale.US,
                     "Shop space: %,d @ %s", e.shopSpace,
                     e.owner.isEmpty() ? "?" : e.owner)));
             if (e.count < e.containerTotal) {

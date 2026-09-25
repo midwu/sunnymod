@@ -371,6 +371,7 @@ public final class ProfitFinder {
      * Shops sitting at "out of stock" / "out of space" — invisible to findFlips/findSelfFlips —
      * ranked by how worth re-visiting they are: estimated payoff if restocked, weighted by
      * staleness, and faded out the more times in a row a rescan has found nothing new.
+     * Shops marked "Dead" (confirmed gone) are skipped entirely — there's nothing to re-visit.
      *
      * @param hideRecentlyScanned skip shops rescanned in the last 15 minutes (just checked, no point yet)
      */
@@ -405,6 +406,7 @@ public final class ProfitFinder {
                 int noChangeStreak = p.length > 9 ? parseIntSafe(p[9].trim(), 0) : 0;
 
                 if (item.isEmpty()) continue;
+                if ("Dead".equalsIgnoreCase(status)) continue; // shop confirmed gone — nothing to re-visit
                 if (containsIgnore(ignoreItems, item) || containsIgnore(ignoreOwners, owner)
                         || containsIgnore(ignoreWarps, warp)) continue;
 
