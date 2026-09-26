@@ -139,6 +139,7 @@ public class WarpDataScreen extends Screen {
                 total, shops, missing, hideMissing ? "   ·   hidden" : "");
         ctx.drawCenteredTextWithShadow(textRenderer, summary, this.width / 2, 24, 0xFFFFFFFF);
         ctx.drawText(textRenderer, "warp_data.csv", PAD, 39, 0xFF666666, false);
+        ctx.drawText(textRenderer, "green = in shop_data + Public Warps", PAD + 105, 39, 0xFF55CC55, false);
 
         if (rows.isEmpty()) {
             String empty = hideMissing
@@ -167,10 +168,22 @@ public class WarpDataScreen extends Screen {
             WarpData.WarpRow row = rows.get(i);
             int rowY = listTop + (i - scrollOffset) * ROW_HEIGHT + 6;
 
-            int nameColor = row.missingFromPublicWarps()
-                    ? 0xFFFF5555
-                    : WarpData.isShopType(row.type()) ? 0xFFFFD700 : 0xFFFFFFFF;
-            int secondaryColor = row.missingFromPublicWarps() ? 0xFFFF5555 : 0xFFAAAAAA;
+            int nameColor;
+            int secondaryColor;
+            if (row.missingFromPublicWarps()) {
+                nameColor = 0xFFFF5555;
+                secondaryColor = 0xFFFF5555;
+            } else if (row.inShopData()) {
+                // Present in both shop_data.csv and warp_data.csv.
+                nameColor = 0xFF55FF55;
+                secondaryColor = 0xFF55CC55;
+            } else if (WarpData.isShopType(row.type())) {
+                nameColor = 0xFFFFD700;
+                secondaryColor = 0xFFAAAAAA;
+            } else {
+                nameColor = 0xFFFFFFFF;
+                secondaryColor = 0xFFAAAAAA;
+            }
 
             String name = row.warp();
             int maxNameW = typeX - nameX - 8;
@@ -181,9 +194,10 @@ public class WarpDataScreen extends Screen {
             }
             ctx.drawText(textRenderer, name, nameX, rowY, nameColor, false);
 
-            String type = row.missingFromPublicWarps()
-                    ? "MISSING"
-                    : row.type().isBlank() ? "—" : row.type();
+            String type;
+            if (row.missingFromPublicWarps()) type = "MISSING";
+            else if (row.inShopData()) type = "SHOP + PUBLIC";
+            else type = row.type().isBlank() ? "—" : row.type();
             ctx.drawText(textRenderer, type, typeX, rowY, secondaryColor, false);
 
             String visits = row.missingFromPublicWarps()

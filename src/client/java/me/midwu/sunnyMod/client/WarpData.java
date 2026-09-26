@@ -59,7 +59,8 @@ public final class WarpData {
             String type,
             long monthlyVisits,
             long allTimeVisits,
-            boolean missingFromPublicWarps
+            boolean missingFromPublicWarps,
+            boolean inShopData
     ) {}
 
     public static boolean isPublicWarps(HandledScreen<?> screen) {
@@ -166,7 +167,7 @@ public final class WarpData {
             WarpEntry publicEntry = publicWarps.get(shop.key);
             if (publicEntry == null) {
                 rows.put(shop.key, new WarpRow(
-                        shop.warp, "shop", 0, 0, true));
+                        shop.warp, "shop", 0, 0, true, true));
             } else {
                 String type = publicEntry.type().isBlank() ? shop.type : publicEntry.type();
                 rows.put(shop.key, new WarpRow(
@@ -174,7 +175,7 @@ public final class WarpData {
                         type,
                         publicEntry.monthlyVisits(),
                         publicEntry.allTimeVisits(),
-                        false));
+                        false, true));
             }
         }
 
@@ -186,7 +187,7 @@ public final class WarpData {
                     entry.type(),
                     entry.monthlyVisits(),
                     entry.allTimeVisits(),
-                    false));
+                    false, false));
         }
 
         List<WarpRow> result = new ArrayList<>(rows.values());
