@@ -213,6 +213,13 @@ public final class WarpData {
         return type != null && type.trim().equalsIgnoreCase("shop");
     }
 
+    private static boolean isWarpCommand(String warp) {
+        if (warp == null) return false;
+        String w = warp.trim();
+        return w.regionMatches(true, 0, "/warp ", 0, 6)
+                && w.substring(6).trim().length() > 0;
+    }
+
     public static String normalizeWarpName(String warp) {
         if (warp == null) return "";
         String w = warp.trim();
@@ -265,6 +272,12 @@ public final class WarpData {
 
                 String warp = p[8].trim();
                 if (warp.isEmpty()) continue;
+
+                // Only values explicitly recorded as /warp <name> belong in the
+                // Public Warps comparison. shop_data can also contain commands
+                // such as /home, /spawn, /forge, etc.; those are not warps from
+                // the Public Warps menu and must not become fake "missing" rows.
+                if (!isWarpCommand(warp)) continue;
 
                 String key = normalizeWarpName(warp);
                 if (key.isEmpty()) continue;
