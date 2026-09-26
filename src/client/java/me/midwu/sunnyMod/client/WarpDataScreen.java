@@ -24,13 +24,16 @@ public class WarpDataScreen extends Screen {
     private static final int HEADER_H = 52;
     private static final int FOOTER_H = 32;
     private static final int PAD = 12;
-    private static final int WARP_BTN_W = 82;
+    private static final int WARP_BTN_W = 68;
+    private static final int SKIP_BTN_W = 52;
+    private static final int BUTTON_GAP = 4;
 
     private List<WarpData.WarpRow> allRows = List.of();
     private List<WarpData.WarpRow> rows = List.of();
     private boolean hideMissing = false;
     private int scrollOffset = 0;
     private int maxScroll = 0;
+    private final java.util.Set<String> skippedWarps = new java.util.HashSet<>();
 
     public WarpDataScreen() {
         super(Text.literal("Warp Data"));
@@ -50,7 +53,38 @@ public class WarpDataScreen extends Screen {
         } else {
             rows = new ArrayList<>(allRows);
         }
+
+        // Keep the requested visual priority: gold first, then green/red,
+        // then the remaining public-only rows. Skipped rows always go last.
+        rows.sort((a, b) -> {
+            int skippedCompare = Boolean.compare(isSkipped(a), isSkipped(b));
+            if (skippedCompare != 0) return skippedCompare;
+
+            int priorityCompare = Integer.compare(rowPriority(a), rowPriority(b));
+            if (priorityCompare != 0) return priorityCompare;
+
+            return a.warp().compareToIgnoreCase(b.warp());
+        });
         scrollOffset = 0;
+    }
+
+    private boolean isSkipped(WarpData.WarpRow row) {
+        return skippedWarps.contains(WarpData.normalizeWarpName(row.warp()));
+    }
+
+    private int rowPriority(WarpData.WarpRow row) {
+        if (row.missingFromPublicWarps()) return 2; // red
+        if (row.inShopData()) return 1;             // green
+        if (WarpData.isShopType(row.type())) return 0; // gold
+        return 3;                                  // white
+    }
+
+    private void skip(String warp) {
+        String key = WarpData.normalizeWarpName(warp);
+        if (key.isEmpty()) return;
+        skippedWarps.add(key);
+        applyFilter();
+        rebuildButtons();
     }
 
     @Override
@@ -101,8 +135,13 @@ public class WarpDataScreen extends Screen {
             WarpData.WarpRow row = rows.get(i);
             int y = HEADER_H + (i - scrollOffset) * ROW_HEIGHT;
             final String warp = row.warp();
+            int skipX = this.width - PAD - SKIP_BTN_W;
+            int actualWarpX = skipX - BUTTON_GAP - WARP_BTN_W;
             addDrawableChild(ButtonWidget.builder(Text.literal("Warp"), b -> warp(warp))
-                    .dimensions(warpX, y, WARP_BTN_W, 20)
+                    .dimensions(actualWarpX, y, WARP_BTN_W, 20)
+                    .build());
+            addDrawableChild(ButtonWidget.builder(Text.literal("Skip"), b -> skip(warp))
+                    .dimensions(skipX, y, SKIP_BTN_W, 20)
                     .build());
         }
     }
@@ -126,8 +165,6 @@ public class WarpDataScreen extends Screen {
 
     @Override
     public void render(DrawContext ctx, int mouseX, int mouseY, float delta) {
-        super.render(ctx, mouseX, mouseY, delta);
-
         int total = allRows.size();
         int missing = (int) allRows.stream().filter(WarpData.WarpRow::missingFromPublicWarps).count();
         int shops = (int) allRows.stream().filter(r -> WarpData.isShopType(r.type())).count();
@@ -139,13 +176,14 @@ public class WarpDataScreen extends Screen {
                 total, shops, missing, hideMissing ? "   ·   hidden" : "");
         ctx.drawCenteredTextWithShadow(textRenderer, summary, this.width / 2, 24, 0xFFFFFFFF);
         ctx.drawText(textRenderer, "warp_data.csv", PAD, 39, 0xFF666666, false);
-        ctx.drawText(textRenderer, "green = in shop_data + Public Warps", PAD + 105, 39, 0xFF55CC55, false);
+        ctx.drawText(textRenderer, "gold = shop   green = both   red = missing   purple = skipped", PAD + 105, 39, 0xFF55CC55, false);
 
         if (rows.isEmpty()) {
             String empty = hideMissing
                     ? "No visible warps. Turn off Hide Missing to show missing shop warps."
                     : "No warp data found. Press F9 in Public Warps first.";
             ctx.drawCenteredTextWithShadow(textRenderer, empty, this.width / 2, HEADER_H + 22, 0xFFAAAAAA);
+            super.render(ctx, mouseX, mouseY, delta);
             return;
         }
 
@@ -157,20 +195,39 @@ public class WarpDataScreen extends Screen {
         int nameX = PAD;
         int typeX = Math.min(175, this.width / 4);
         int visitsX = Math.min(330, this.width / 2);
-        int warpX = this.width - PAD - WARP_BTN_W;
+        int skipX = this.width - PAD - SKIP_BTN_W;
+        int warpX = skipX - BUTTON_GAP - WARP_BTN_W;
 
         ctx.drawText(textRenderer, "Warp", nameX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Type", typeX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Monthly / All-time", visitsX, listTop - 12, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Action", warpX, listTop - 12, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Skip", skipX, listTop - 12, 0xFFAAAAAA, false);
+
+        // Highlight the entire row under the cursor, matching the F8-style
+        // hover feedback instead of limiting the effect to the buttons.
+        for (int i = scrollOffset; i < end; i++) {
+            int rowTop = listTop + (i - scrollOffset) * ROW_HEIGHT;
+            if (mouseX >= PAD && mouseX < this.width - PAD
+                    && mouseY >= rowTop && mouseY < rowTop + ROW_HEIGHT) {
+                ctx.fill(PAD, rowTop, this.width - PAD, rowTop + ROW_HEIGHT, 0x55333333);
+            }
+        }
+
+        // Draw widgets after the row hover background so the buttons stay visible.
+        super.render(ctx, mouseX, mouseY, delta);
 
         for (int i = scrollOffset; i < end; i++) {
             WarpData.WarpRow row = rows.get(i);
             int rowY = listTop + (i - scrollOffset) * ROW_HEIGHT + 6;
 
+            boolean skipped = isSkipped(row);
             int nameColor;
             int secondaryColor;
-            if (row.missingFromPublicWarps()) {
+            if (skipped) {
+                nameColor = 0xFFAA66FF;
+                secondaryColor = 0xFFAA66FF;
+            } else if (row.missingFromPublicWarps()) {
                 nameColor = 0xFFFF5555;
                 secondaryColor = 0xFFFF5555;
             } else if (row.inShopData()) {
@@ -195,7 +252,8 @@ public class WarpDataScreen extends Screen {
             ctx.drawText(textRenderer, name, nameX, rowY, nameColor, false);
 
             String type;
-            if (row.missingFromPublicWarps()) type = "MISSING";
+            if (skipped) type = "SKIPPED";
+            else if (row.missingFromPublicWarps()) type = "MISSING";
             else if (row.inShopData()) type = "SHOP + PUBLIC";
             else type = row.type().isBlank() ? "—" : row.type();
             ctx.drawText(textRenderer, type, typeX, rowY, secondaryColor, false);
@@ -213,7 +271,7 @@ public class WarpDataScreen extends Screen {
         }
         ctx.drawText(textRenderer,
                 "Warp → /warp <name> → findsign each",
-                PAD + 215, this.height - FOOTER_H + 10, 0xFF666666, false);
+                PAD + 280, this.height - FOOTER_H + 10, 0xFF666666, false);
     }
 
     @Override
