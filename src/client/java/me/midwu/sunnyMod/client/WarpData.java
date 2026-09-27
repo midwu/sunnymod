@@ -41,6 +41,10 @@ public final class WarpData {
     private static final String HEADER =
             "Warp,Type,MonthlyVisits,AllTimeVisits,ItemId,LastSeen";
 
+    // Skip state belongs to the current warp-data list, not to a single F9 screen.
+    // It survives closing/reopening F9 and is cleared when Public Warps is scanned again.
+    private static final java.util.Set<String> SKIPPED_WARPS = new java.util.HashSet<>();
+
     public record WarpEntry(
             String warp,
             String type,
@@ -140,6 +144,11 @@ public final class WarpData {
         }
 
         write(entries);
+        if (found > 0) {
+            // A fresh Public Warps scan means the list has been updated, so
+            // previously skipped entries become eligible to show again.
+            SKIPPED_WARPS.clear();
+        }
         return found;
     }
 
@@ -208,6 +217,15 @@ public final class WarpData {
 
     public static Path getFile() {
         return WARP_FILE;
+    }
+
+    public static boolean isSkipped(String warp) {
+        return SKIPPED_WARPS.contains(normalizeWarpName(warp));
+    }
+
+    public static void skipWarp(String warp) {
+        String key = normalizeWarpName(warp);
+        if (!key.isEmpty()) SKIPPED_WARPS.add(key);
     }
 
     public static boolean isShopType(String type) {

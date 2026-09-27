@@ -33,7 +33,6 @@ public class WarpDataScreen extends Screen {
     private boolean hideMissing = false;
     private int scrollOffset = 0;
     private int maxScroll = 0;
-    private final java.util.Set<String> skippedWarps = new java.util.HashSet<>();
 
     public WarpDataScreen() {
         super(Text.literal("Warp Data"));
@@ -69,7 +68,7 @@ public class WarpDataScreen extends Screen {
     }
 
     private boolean isSkipped(WarpData.WarpRow row) {
-        return skippedWarps.contains(WarpData.normalizeWarpName(row.warp()));
+        return WarpData.isSkipped(row.warp());
     }
 
     private int rowPriority(WarpData.WarpRow row) {
@@ -82,7 +81,7 @@ public class WarpDataScreen extends Screen {
     private void skip(String warp) {
         String key = WarpData.normalizeWarpName(warp);
         if (key.isEmpty()) return;
-        skippedWarps.add(key);
+        WarpData.skipWarp(key);
         applyFilter();
         rebuildButtons();
     }
