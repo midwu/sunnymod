@@ -4,6 +4,9 @@
   "package": "me.midwu.sunnyMod.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "SunnyModDataPacketMixin",
+    "SunnyModInGameHudMixin",
+    "SunnyModClientPlayNetworkHandlerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

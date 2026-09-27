@@ -4,14 +4,19 @@
   "version": "${version}",
   "name": "Sunny Mod",
   "description": "A client-side mod for the Sunny Minecraft server by midwu",
-  "authors": ["midwu"],
+  "authors": [
+    "midwu"
+  ],
   "contact": {},
   "license": "All-Rights-Reserved",
   "icon": "assets/sunny-mod/icon.png",
   "environment": "client",
   "entrypoints": {
-    "main": ["me.midwu.sunnyMod.SunnyMod"],
+    "main": [
+      "me.midwu.sunnyMod.SunnyMod"
+    ],
     "client": [
+      "me.midwu.sunnyMod.client.SunnyModEventLogger",
       "me.midwu.sunnyMod.client.SunnyModClient",
       "me.midwu.sunnyMod.client.ShopLogger",
       "me.midwu.sunnyMod.client.Hud",

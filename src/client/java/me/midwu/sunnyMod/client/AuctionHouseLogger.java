@@ -322,7 +322,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
     if (timeLeft == null || timeLeft.isBlank()) return -1;
     long total = 0;
     // Java string: \\d and \\s so the regex engine sees \d and \s
-    java.util.regex.Matcher m = Pattern.compile(
+    Matcher m = Pattern.compile(
             "(?:(\\d+)\\s*d)?\\s*(?:(\\d+)\\s*h)?\\s*(?:(\\d+)\\s*m)?\\s*(?:(\\d+)\\s*s)?",
             Pattern.CASE_INSENSITIVE).matcher(timeLeft.trim());
     if (!m.find()) return -1;
@@ -336,7 +336,7 @@ public class AuctionHouseLogger implements ClientModInitializer {
   static long parseTimestampSeconds(String ts) {
     if (ts == null || ts.isBlank()) return -1;
     try {
-      return java.time.LocalDateTime.parse(ts, TS)
+      return LocalDateTime.parse(ts, TS)
               .atZone(java.time.ZoneId.systemDefault())
               .toEpochSecond();
     } catch (Exception e) {
