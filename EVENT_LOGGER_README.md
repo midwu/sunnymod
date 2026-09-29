@@ -29,3 +29,19 @@ This is intentionally broad but does not attempt to record every world/chunk pac
 When you next play with this build, reproduce the Skills actions you care about. Then send the resulting `event_log.txt`. We can use it to determine exactly which events represent skill XP, level-ups, ability unlocks, cooldowns and other progression state.
 
 No parsing or automatic Skills interpretation is performed yet.
+
+## Boss/progression bar capture
+
+The event logger captures the client-side `BossBarHud` directly. It uses a
+Mixin accessor rather than Java reflection so the `bossBars` field is remapped
+correctly for the Minecraft 1.21.11 runtime.
+
+Logged events:
+
+- `BOSSBAR_ADD` — a bar appeared
+- `BOSSBAR_UPDATE` — its name, progress, color, or style changed
+- `BOSSBAR_REMOVE` — a bar disappeared
+- `BOSSBAR_CLEAR` — the world/disconnect cleared the tracked bars
+
+This is intended to capture plugin progression bars such as the Skills Mining
+bar shown at the top of the screen.

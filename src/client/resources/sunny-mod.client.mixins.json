@@ -4,6 +4,7 @@
   "package": "me.midwu.sunnyMod.mixin.client",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "SunnyModBossBarHudAccessor",
     "SunnyModDataPacketMixin",
     "SunnyModInGameHudMixin",
     "SunnyModClientPlayNetworkHandlerMixin"

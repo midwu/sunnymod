@@ -6,11 +6,11 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.hud.BossBarHud;
 import net.minecraft.client.gui.hud.ClientBossBar;
+import me.midwu.sunnyMod.mixin.client.SunnyModBossBarHudAccessor;
 import net.minecraft.text.Text;
 
 import java.io.BufferedWriter;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -51,7 +51,7 @@ public final class SunnyModEventLogger implements ClientModInitializer {
     private static final Map<UUID, BossSnapshot> LAST_BOSS_BARS = new LinkedHashMap<>();
 
     private static boolean initialized = false;
-    private static Field bossBarsField;
+    private static boolean bossBarCaptureErrorLogged = false;
 
     @Override
     public void onInitializeClient() {
@@ -127,14 +127,8 @@ public final class SunnyModEventLogger implements ClientModInitializer {
         try {
             BossBarHud hud = client.inGameHud.getBossBarHud();
 
-            if (bossBarsField == null) {
-                bossBarsField = BossBarHud.class.getDeclaredField("bossBars");
-                bossBarsField.setAccessible(true);
-            }
-
-            @SuppressWarnings("unchecked")
             Map<UUID, ClientBossBar> bars =
-                    (Map<UUID, ClientBossBar>) bossBarsField.get(hud);
+                    ((SunnyModBossBarHudAccessor) (Object) hud).sunnymod$getBossBars();
 
             Map<UUID, BossSnapshot> current = new LinkedHashMap<>();
 
@@ -168,13 +162,13 @@ public final class SunnyModEventLogger implements ClientModInitializer {
             LAST_BOSS_BARS.clear();
             LAST_BOSS_BARS.putAll(current);
         } catch (Throwable t) {
-            // Don't spam the game log every tick if mappings/implementation
-            // differ. One line is enough to diagnose the failure.
-            if (bossBarsField != null) {
+            // Don't spam the log every tick if a mapping/runtime differs.
+            if (!bossBarCaptureErrorLogged) {
                 write("ERROR", "bossbar capture failed: "
                         + t.getClass().getSimpleName() + ": " + t.getMessage());
-                bossBarsField = null;
+                bossBarCaptureErrorLogged = true;
             }
+            LAST_BOSS_BARS.clear();
         }
     }
 
