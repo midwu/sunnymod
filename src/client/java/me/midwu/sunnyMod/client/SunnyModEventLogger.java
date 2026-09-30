@@ -116,7 +116,7 @@ public final class SunnyModEventLogger implements ClientModInitializer {
         write("HEALTH", "health=" + health + ",food=" + food);
     }
 
-    public static void logRenderedBossBar(BossBar bossBar, int x, int y, int width) {
+    public static void logRenderedBossBar(BossBar bossBar, int x, int y) {
         if (bossBar == null) return;
         write("BOSSBAR_RENDER",
                 "name=" + quote(text(bossBar.getName()))
@@ -125,7 +125,6 @@ public final class SunnyModEventLogger implements ClientModInitializer {
                         + ",style=" + bossBar.getStyle().name()
                         + ",x=" + x
                         + ",y=" + y
-                        + ",width=" + width
                         + ",class=" + bossBar.getClass().getName());
     }
 
