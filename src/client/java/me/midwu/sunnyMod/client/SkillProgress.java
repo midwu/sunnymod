@@ -1,6 +1,6 @@
 package me.midwu.sunnyMod.client;
 
-/** Live progression state parsed from the server's Skills boss/progression bar. */
+/** Live progression state for one Sunny Skills skill. */
 public record SkillProgress(
         String name,
         int level,

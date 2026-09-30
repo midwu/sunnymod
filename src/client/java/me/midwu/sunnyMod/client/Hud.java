@@ -162,6 +162,40 @@ public class Hud implements ClientModInitializer {
                 }
             }
         }
+
+        renderSkillsXpPanel(ctx, client);
+    }
+
+    // ── Live Skills XP panel ──────────────────────────────────────────────────
+
+    private void renderSkillsXpPanel(DrawContext ctx, MinecraftClient client) {
+        String skillName = SkillsDataStore.activeSkillName();
+        if (skillName == null) return;
+
+        SkillProgress skill = SkillsDataStore.get(skillName);
+        if (skill == null) return;
+
+        final int width = 178;
+        final int height = 55;
+        final int x = client.getWindow().getScaledWidth() - width - 8;
+        final int y = 52;
+        final int textX = x + 7;
+
+        ctx.fill(x, y, x + width, y + height, COLOR_BG);
+        ctx.drawText(client.textRenderer,
+                skill.name() + " Lv. " + skill.level(), textX, y + 6, COLOR_HEADER, true);
+        ctx.fill(x + 5, y + 18, x + width - 5, y + 20, COLOR_DIVIDER);
+
+        double average = SkillsDataStore.averageXpPerHour(skill.name());
+        double rolling = SkillsDataStore.xpPerHour(skill.name());
+        String rate = average > 0 ? SkillsDataStore.formatRate(average) : "Warming up...";
+        String rollingText = rolling > 0 ? SkillsDataStore.formatRate(rolling) : "-- XP/hr";
+
+        ctx.drawText(client.textRenderer, "Avg: " + rate, textX, y + 24, COLOR_VALUE, true);
+        ctx.drawText(client.textRenderer, "Recent: " + rollingText, textX, y + 36, COLOR_LABEL, true);
+        ctx.drawText(client.textRenderer,
+                "+" + SkillsDataStore.formatXp(SkillsDataStore.sessionXp(skill.name())) + " XP",
+                textX + 104, y + 24, COLOR_VALUE, true);
     }
 
     // ── Fishing panel ─────────────────────────────────────────────────────────

@@ -11,32 +11,33 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Live Skills model. It intentionally only accepts the exact boss-bar format
- * we observed during the data-collection phase:
- *   Skill Name | Level 79 | 48,158.08/98,607.8 XP
- *
- * Job bars and ordinary Minecraft boss bars are rejected by the allow-list.
+ * Live Skills model. The server's /skills menu is the authoritative snapshot
+ * for all skills; the progression boss bar supplies high-frequency updates
+ * for whichever skill is currently active.
  */
 public final class SkillsDataStore {
     private static final Pattern SKILL_BAR = Pattern.compile(
             "^\\s*(.+?)\\s*\\|\\s*Level\\s+(\\d+)\\s*\\|\\s*([0-9,.]+)\\s*/\\s*([0-9,.]+)\\s*XP\\s*$",
             Pattern.CASE_INSENSITIVE);
 
-    // These are the skill names established by the Skills container data.
-    // Slayer is included because it is part of the observed Skills system;
-    // job bars are deliberately not included here.
+    private static final Pattern MENU_SKILL = Pattern.compile(
+            "^\\s*(.+?)\\s+Skill\\s*$", Pattern.CASE_INSENSITIVE);
+
     private static final List<String> ORDER = List.of(
             "Mining", "Woodcutting", "Fishing", "Digging", "Farming",
             "Taming", "Alchemy", "Enchanting", "Slayer"
     );
 
     private static final Map<String, SkillProgress> SKILLS = new LinkedHashMap<>();
+    private static final Map<String, RateState> RATES = new LinkedHashMap<>();
+    private static String activeSkillName;
+    private static long activeSkillUpdatedAt;
 
     private SkillsDataStore() {}
 
+    /** Called by the live boss/progression bar. */
     public static synchronized boolean updateFromBossBar(String rawName, float percent) {
         if (rawName == null) return false;
-
         Matcher matcher = SKILL_BAR.matcher(rawName.trim());
         if (!matcher.matches()) return false;
 
@@ -47,12 +48,92 @@ public final class SkillsDataStore {
             int level = Integer.parseInt(matcher.group(2));
             double current = parseNumber(matcher.group(3));
             double required = parseNumber(matcher.group(4));
-
-            SKILLS.put(name, new SkillProgress(
-                    name, level, current, required, percent, System.currentTimeMillis()));
+            update(name, level, current, required, percent);
+            activeSkillName = name;
+            activeSkillUpdatedAt = System.currentTimeMillis();
             return true;
         } catch (NumberFormatException ignored) {
             return false;
+        }
+    }
+
+    /** Called by the /skills container scanner. */
+    public static synchronized boolean updateFromMenu(
+            String rawSkillName, int level, double currentXp, double requiredXp) {
+        String name = canonicalName(rawSkillName);
+        if (name == null) return false;
+        float percent = requiredXp <= 0 ? 1.0f :
+                (float) Math.max(0.0, Math.min(1.0, currentXp / requiredXp));
+        update(name, level, currentXp, requiredXp, percent);
+        return true;
+    }
+
+    public static synchronized String activeSkillName() {
+        if (activeSkillName == null) return null;
+        if (System.currentTimeMillis() - activeSkillUpdatedAt > 5000L) return null;
+        return activeSkillName;
+    }
+
+    public static synchronized long activeSkillAgeMs() {
+        if (activeSkillName == null) return Long.MAX_VALUE;
+        return Math.max(0L, System.currentTimeMillis() - activeSkillUpdatedAt);
+    }
+
+    private static void update(String name, int level, double current, double required, float percent) {
+        long now = System.currentTimeMillis();
+        RateState state = RATES.computeIfAbsent(name, ignored -> new RateState(now));
+        SkillProgress previous = SKILLS.get(name);
+        if (previous != null) {
+            updateRate(name, previous, level, current, required, now, state);
+        } else {
+            state.lastSampleTime = now;
+            state.lastLevel = level;
+            state.lastXp = current;
+        }
+        SKILLS.put(name, new SkillProgress(name, level, current, required, percent, now));
+    }
+
+    private static void updateRate(String name, SkillProgress previous, int level,
+                                   double current, double required, long now, RateState state) {
+        if (state.lastSampleTime == 0L) {
+            state.lastSampleTime = now;
+            state.lastLevel = previous.level();
+            state.lastXp = previous.currentXp();
+            return;
+        }
+
+        double delta;
+        if (level == state.lastLevel) {
+            delta = current - state.lastXp;
+            if (delta < 0) {
+                // A decrease without a level change is normally a UI reset or
+                // stale packet. Do not turn it into negative XP/hour.
+                delta = 0;
+            }
+        } else if (level > state.lastLevel) {
+            // We may not receive the exact final pre-level-up bar value. Count
+            // the visible remainder plus the new level's progress. This keeps
+            // the HUD responsive; /skills snapshots can re-anchor the session.
+            delta = Math.max(0.0, previous.requiredXp() - state.lastXp) + current;
+        } else {
+            delta = 0.0;
+        }
+
+        long elapsed = now - state.lastSampleTime;
+        if (elapsed > 0 && delta > 0) {
+            state.window.add(new RateSample(now, delta));
+            state.sessionXp += delta;
+        }
+        pruneWindow(state, now);
+        state.lastSampleTime = now;
+        state.lastLevel = level;
+        state.lastXp = current;
+    }
+
+    private static void pruneWindow(RateState state, long now) {
+        long cutoff = now - 60_000L;
+        while (!state.window.isEmpty() && state.window.peekFirst().time < cutoff) {
+            state.window.removeFirst();
         }
     }
 
@@ -62,8 +143,6 @@ public final class SkillsDataStore {
             SkillProgress progress = SKILLS.get(name);
             if (progress != null) result.add(progress);
         }
-        // Unknown-but-valid skill names are retained at the end, so a server
-        // addition does not silently disappear from the UI.
         SKILLS.values().stream()
                 .filter(s -> !ORDER.contains(s.name()))
                 .sorted(Comparator.comparing(SkillProgress::name, String.CASE_INSENSITIVE_ORDER))
@@ -79,9 +158,49 @@ public final class SkillsDataStore {
         return List.copyOf(SKILLS.values());
     }
 
+    /** Current rolling XP/hour, based on the last 60 seconds of observed XP. */
+    public static synchronized double xpPerHour(String name) {
+        RateState state = RATES.get(canonicalName(name));
+        if (state == null) return 0.0;
+        long now = System.currentTimeMillis();
+        pruneWindow(state, now);
+        if (state.window.isEmpty()) return 0.0;
+        double xp = state.window.stream().mapToDouble(s -> s.xp).sum();
+        long span = Math.max(1L, now - state.window.peekFirst().time);
+        return xp * 3_600_000.0 / span;
+    }
+
+    public static synchronized double sessionXp(String name) {
+        RateState state = RATES.get(canonicalName(name));
+        return state == null ? 0.0 : state.sessionXp;
+    }
+
+    /** Average XP/hour over the whole observed session for this skill. */
+    public static synchronized double averageXpPerHour(String name) {
+        RateState state = RATES.get(canonicalName(name));
+        if (state == null || state.sessionStartTime == 0L) return 0.0;
+        long elapsed = System.currentTimeMillis() - state.sessionStartTime;
+        if (elapsed < 10_000L || state.sessionXp <= 0.0) return 0.0;
+        return state.sessionXp * 3_600_000.0 / elapsed;
+    }
+
+    public static synchronized long sessionDurationMs(String name) {
+        RateState state = RATES.get(canonicalName(name));
+        if (state == null || state.lastSampleTime == 0L) return 0L;
+        return Math.max(0L, System.currentTimeMillis() - state.sessionStartTime);
+    }
+
+    public static synchronized void resetRates() {
+        RATES.clear();
+        activeSkillName = null;
+        activeSkillUpdatedAt = 0L;
+    }
+
     private static String canonicalName(String raw) {
         if (raw == null) return null;
         String clean = raw.trim().replaceAll("\\s+", " ");
+        Matcher menu = MENU_SKILL.matcher(clean);
+        if (menu.matches()) clean = menu.group(1).trim();
         for (String known : ORDER) {
             if (known.equalsIgnoreCase(clean)) return known;
         }
@@ -100,4 +219,27 @@ public final class SkillsDataStore {
                 .replaceAll("0+$", "")
                 .replaceAll("\\.$", "");
     }
+
+    public static String formatRate(double xpPerHour) {
+        if (xpPerHour <= 0.0) return "-- XP/hr";
+        if (xpPerHour >= 1000.0) {
+            return String.format(Locale.US, "%,.1fK XP/hr", xpPerHour / 1000.0);
+        }
+        return String.format(Locale.US, "%,.0f XP/hr", xpPerHour);
+    }
+
+    private static final class RateState {
+        final java.util.ArrayDeque<RateSample> window = new java.util.ArrayDeque<>();
+        long sessionStartTime;
+        long lastSampleTime;
+        int lastLevel;
+        double lastXp;
+        double sessionXp;
+
+        RateState(long now) {
+            sessionStartTime = now;
+        }
+    }
+
+    private record RateSample(long time, double xp) {}
 }
