@@ -3,6 +3,7 @@ package me.midwu.sunnyMod.mixin.client;
 import me.midwu.sunnyMod.client.SunnyModEventLogger;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.network.packet.s2c.play.AdvancementUpdateS2CPacket;
+import net.minecraft.network.packet.s2c.play.BossBarS2CPacket;
 import net.minecraft.network.packet.s2c.play.CooldownUpdateS2CPacket;
 import net.minecraft.network.packet.CustomPayload;
 import net.minecraft.network.packet.s2c.play.InventoryS2CPacket;
@@ -91,6 +92,11 @@ public abstract class SunnyModDataPacketMixin {
     private void sunnymod$particle(
             ParticleS2CPacket packet, CallbackInfo ci) {
         log("PACKET_PARTICLE", packet);
+    }
+
+    @Inject(method = "onBossBar", at = @At("HEAD"))
+    private void sunnymod$bossBar(BossBarS2CPacket packet, CallbackInfo ci) {
+        log("PACKET_BOSSBAR", packet);
     }
 
     @Inject(method = "onCooldownUpdate", at = @At("HEAD"))

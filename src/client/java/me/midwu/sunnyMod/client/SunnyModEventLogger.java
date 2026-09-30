@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.hud.BossBarHud;
 import net.minecraft.client.gui.hud.ClientBossBar;
+import net.minecraft.entity.boss.BossBar;
 import me.midwu.sunnyMod.mixin.client.SunnyModBossBarHudAccessor;
 import net.minecraft.text.Text;
 
@@ -113,6 +114,19 @@ public final class SunnyModEventLogger implements ClientModInitializer {
 
     public static void logHealth(float health, int food) {
         write("HEALTH", "health=" + health + ",food=" + food);
+    }
+
+    public static void logRenderedBossBar(BossBar bossBar, int x, int y, int width) {
+        if (bossBar == null) return;
+        write("BOSSBAR_RENDER",
+                "name=" + quote(text(bossBar.getName()))
+                        + ",percent=" + bossBar.getPercent()
+                        + ",color=" + bossBar.getColor().name()
+                        + ",style=" + bossBar.getStyle().name()
+                        + ",x=" + x
+                        + ",y=" + y
+                        + ",width=" + width
+                        + ",class=" + bossBar.getClass().getName());
     }
 
     private static void tickBossBars(MinecraftClient client) {
