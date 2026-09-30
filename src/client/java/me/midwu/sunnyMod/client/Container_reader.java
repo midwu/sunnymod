@@ -70,6 +70,7 @@ public class Container_reader implements ClientModInitializer {
     private static boolean wasF7Down = false;
     private static boolean wasF8Down = false;
     private static boolean wasF9Down = false;
+    private static boolean wasF10Down = false;
 
     // Cache for the F7 valuation lookup, keyed off shop_data.csv's
     // last-modified time so repeated F7 presses in the same session don't
@@ -271,6 +272,16 @@ public class Container_reader implements ClientModInitializer {
                 }
             }
             wasF9Down = isF9Down;
+
+            // F10 — live Skills dashboard. Use the same direct GLFW polling as
+            // F8/F9 so it also works while another Minecraft screen owns input.
+            boolean isF10Down = GLFW.glfwGetKey(windowHandle, GLFW.GLFW_KEY_F10) == GLFW.GLFW_PRESS;
+            if (isF10Down && !wasF10Down) {
+                if (!(client.currentScreen instanceof SkillsScreen)) {
+                    client.setScreen(new SkillsScreen());
+                }
+            }
+            wasF10Down = isF10Down;
         });
     }
 

@@ -118,8 +118,10 @@ public final class SunnyModEventLogger implements ClientModInitializer {
 
     public static void logRenderedBossBar(BossBar bossBar, int x, int y) {
         if (bossBar == null) return;
+        String bossName = text(bossBar.getName());
+        SkillsDataStore.updateFromBossBar(bossName, bossBar.getPercent());
         write("BOSSBAR_RENDER",
-                "name=" + quote(text(bossBar.getName()))
+                "name=" + quote(bossName)
                         + ",percent=" + bossBar.getPercent()
                         + ",color=" + bossBar.getColor().name()
                         + ",style=" + bossBar.getStyle().name()
@@ -149,8 +151,11 @@ public final class SunnyModEventLogger implements ClientModInitializer {
                 UUID id = entry.getKey();
                 ClientBossBar bar = entry.getValue();
 
+                String bossName = text(bar.getName());
+                SkillsDataStore.updateFromBossBar(bossName, bar.getPercent());
+
                 BossSnapshot snapshot = new BossSnapshot(
-                        text(bar.getName()),
+                        bossName,
                         bar.getPercent(),
                         bar.getColor().name(),
                         bar.getStyle().name()
