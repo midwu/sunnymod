@@ -17,8 +17,8 @@ public class HudEditScreen extends Screen {
 
     // Panel keys and their display labels, in one place so every list below
     // (dragging, checkboxes, click handling) always stays in sync.
-    private static final String[] PANELS = {"fishing", "earnings", "shop", "sign", "worth"};
-    private static final String[] LABELS = {"Fishing", "Earnings", "Shop", "Sign", "Worth"};
+    private static final String[] PANELS = {"fishing", "earnings", "shop", "sign", "worth", "skills"};
+    private static final String[] LABELS = {"Fishing", "Earnings", "Shop", "Sign", "Worth", "Skills XP"};
 
     private String  draggingPanel = null;
     private double  dragOffsetX   = 0;
@@ -187,6 +187,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> cfg.shopVisible     = !cfg.shopVisible;
             case "sign"     -> cfg.signVisible     = !cfg.signVisible;
             case "worth"    -> cfg.worthVisible    = !cfg.worthVisible;
+            case "skills"   -> cfg.skillsVisible   = !cfg.skillsVisible;
         }
     }
 
@@ -222,6 +223,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> cfg.shopX;
             case "sign"     -> cfg.signX;
             case "worth"    -> cfg.worthX;
+            case "skills"   -> cfg.skillsX;
             default -> 0;
         };
     }
@@ -233,6 +235,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> cfg.shopY;
             case "sign"     -> cfg.signY;
             case "worth"    -> cfg.worthY;
+            case "skills"   -> cfg.skillsY;
             default -> 0;
         };
     }
@@ -240,6 +243,7 @@ public class HudEditScreen extends Screen {
     private int getPanelWidth(String panel) {
         return switch (panel) {
             case "sign"     -> Hud.getSignPanelWidth();
+            case "skills"   -> Hud.getSkillsPanelWidth();
             default         -> Hud.PANEL_WIDTH;
         };
     }
@@ -251,6 +255,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> Hud.getShopPanelHeight();
             case "sign"     -> Hud.getSignPanelHeight();
             case "worth"    -> Hud.getWorthPanelHeight();
+            case "skills"   -> Hud.getSkillsPanelHeight();
             default -> 20;
         };
     }
@@ -262,6 +267,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> cfg.shopVisible;
             case "sign"     -> cfg.signVisible;
             case "worth"    -> cfg.worthVisible;
+            case "skills"   -> cfg.skillsVisible;
             default -> true;
         };
     }
@@ -273,6 +279,7 @@ public class HudEditScreen extends Screen {
             case "shop"     -> { cfg.shopX     = x; cfg.shopY     = y; }
             case "sign"     -> { cfg.signX     = x; cfg.signY     = y; }
             case "worth"    -> { cfg.worthX    = x; cfg.worthY    = y; }
+            case "skills"   -> { cfg.skillsX   = x; cfg.skillsY   = y; }
         }
     }
 
