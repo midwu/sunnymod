@@ -169,29 +169,46 @@ public class Hud implements ClientModInitializer {
     // ── Live Skills XP panel ──────────────────────────────────────────────────
 
     private void renderSkillsXpPanel(DrawContext ctx, MinecraftClient client) {
-        String skillName = SkillsDataStore.activeSkillName();
-        if (skillName == null) return;
+        java.util.List<SkillProgress> skills = SkillsDataStore.snapshot();
+        if (skills.isEmpty()) return;
 
-        SkillProgress skill = SkillsDataStore.get(skillName);
-        if (skill == null) return;
-
-        final int width = 218;
-        final int height = 52;
+        final int width = 285;
+        final int rowHeight = 18;
+        final int height = 18 + skills.size() * rowHeight + 8;
         final int x = client.getWindow().getScaledWidth() - width - 8;
         final int y = 52;
         final int textX = x + 7;
+        final String active = SkillsDataStore.activeSkillName();
 
         ctx.fill(x, y, x + width, y + height, COLOR_BG);
-        ctx.drawText(client.textRenderer,
-                skill.name() + " Lv. " + skill.level(), textX, y + 6, COLOR_HEADER, true);
-        ctx.fill(x + 5, y + 18, x + width - 5, y + 20, COLOR_DIVIDER);
+        ctx.drawText(client.textRenderer, "Skills XP", textX, y + 5, COLOR_HEADER, true);
+        ctx.fill(x + 5, y + 17, x + width - 5, y + 18, COLOR_DIVIDER);
 
-        double averagePerSecond = SkillsDataStore.averageXpPerSecond(skill.name());
-        String perSecond = averagePerSecond > 0
-                ? SkillsDataStore.formatRatePerSecond(averagePerSecond)
-                : "Warming up...";
+        int cursor = y + 22;
+        for (SkillProgress skill : skills) {
+            boolean isActive = skill.name().equals(active);
+            if (isActive) {
+                ctx.fill(x + 3, cursor - 2, x + width - 3, cursor + 12, 0x33222222);
+            }
 
-        ctx.drawText(client.textRenderer, "Avg: " + perSecond, textX, y + 27, COLOR_VALUE, true);
+            String name = (isActive ? "> " : "  ") + skill.name();
+            ctx.drawText(client.textRenderer, name, textX, cursor,
+                    isActive ? COLOR_HEADER : COLOR_VALUE, true);
+
+            String rate = SkillsDataStore.formatRatePerSecond(
+                    SkillsDataStore.xpPerSecond(skill.name()));
+            int rateWidth = client.textRenderer.getWidth(rate);
+            ctx.drawText(client.textRenderer, rate,
+                    x + width - 7 - rateWidth, cursor, COLOR_VALUE, true);
+
+            String session = "+" + SkillsDataStore.formatXp(
+                    SkillsDataStore.sessionXp(skill.name())) + " XP";
+            int sessionWidth = client.textRenderer.getWidth(session);
+            ctx.drawText(client.textRenderer, session,
+                    x + width - 14 - rateWidth - sessionWidth, cursor, COLOR_LABEL, false);
+
+            cursor += rowHeight;
+        }
     }
 
     // ── Fishing panel ─────────────────────────────────────────────────────────
