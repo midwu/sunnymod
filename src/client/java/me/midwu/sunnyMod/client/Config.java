@@ -46,8 +46,6 @@ public class Config {
     public int signY     = 96;
     public int worthX    = 6;
     public int worthY    = 126;
-    public int skillsX   = 6;
-    public int skillsY   = 156;
 
     // ── HUD panel visibility ──────────────────────────────────────────────────
     public boolean fishingVisible  = true;
@@ -55,10 +53,9 @@ public class Config {
     public boolean shopVisible     = true;
     public boolean signVisible     = true;
     public boolean worthVisible    = true;
-    public boolean skillsVisible   = true;
 
     // ── HUD panel order ───────────────────────────────────────────────────────
-    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth", "skills");
+    public List<String> panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
 
     // ── Fishing timer ─────────────────────────────────────────────────────────
     public int timeOffset = 0;
@@ -88,12 +85,8 @@ public class Config {
                 instance = GSON.fromJson(reader, Config.class);
                 if (instance == null)
                     instance = new Config();
-                if (instance.panelOrder == null) {
-                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth", "skills");
-                } else if (!instance.panelOrder.contains("skills")) {
-                    instance.panelOrder = new java.util.ArrayList<>(instance.panelOrder);
-                    instance.panelOrder.add("skills");
-                }
+                if (instance.panelOrder == null)
+                    instance.panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
             } catch (IOException e) {
                 System.err.println("[SunnyMod] Failed to load config: " + e.getMessage());
                 instance = new Config();
@@ -118,14 +111,12 @@ public class Config {
         shopX     = 6;  shopY     = 66;
         signX     = 6;  signY     = 96;
         worthX    = 6;  worthY    = 126;
-        skillsX   = 6;  skillsY   = 156;
         fishingVisible  = true;
         earningsVisible = true;
         shopVisible     = true;
         signVisible     = true;
         worthVisible    = true;
-        skillsVisible   = true;
-        panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth", "skills");
+        panelOrder = Arrays.asList("fishing", "earnings", "shop", "sign", "worth");
     }
 
     public long earningsHideDelayMs() { return (long) earningsHideDelayMinutes * 60 * 1000L; }

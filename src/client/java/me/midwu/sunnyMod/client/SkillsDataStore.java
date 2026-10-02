@@ -107,7 +107,7 @@ public final class SkillsDataStore {
             delta = current - state.lastXp;
             if (delta < 0) {
                 // A decrease without a level change is normally a UI reset or
-                // stale packet. Do not turn it into negative XP/second.
+                // stale packet. Do not turn it into negative XP/hour.
                 delta = 0;
             }
         } else if (level > state.lastLevel) {
@@ -158,8 +158,8 @@ public final class SkillsDataStore {
         return List.copyOf(SKILLS.values());
     }
 
-    /** Current rolling XP/second, based on the last 60 seconds of observed XP. */
-    public static synchronized double xpPerSecond(String name) {
+    /** Current rolling XP/hour, based on the last 60 seconds of observed XP. */
+    public static synchronized double xpPerHour(String name) {
         RateState state = RATES.get(canonicalName(name));
         if (state == null) return 0.0;
         long now = System.currentTimeMillis();
@@ -167,7 +167,7 @@ public final class SkillsDataStore {
         if (state.window.isEmpty()) return 0.0;
         double xp = state.window.stream().mapToDouble(s -> s.xp).sum();
         long span = Math.max(1L, now - state.window.peekFirst().time);
-        return xp * 1000.0 / span;
+        return xp * 3_600_000.0 / span;
     }
 
     public static synchronized double sessionXp(String name) {
@@ -175,13 +175,13 @@ public final class SkillsDataStore {
         return state == null ? 0.0 : state.sessionXp;
     }
 
-    /** Average XP/second over the whole observed session for this skill. */
-    public static synchronized double averageXpPerSecond(String name) {
+    /** Average XP/hour over the whole observed session for this skill. */
+    public static synchronized double averageXpPerHour(String name) {
         RateState state = RATES.get(canonicalName(name));
         if (state == null || state.sessionStartTime == 0L) return 0.0;
         long elapsed = System.currentTimeMillis() - state.sessionStartTime;
         if (elapsed < 10_000L || state.sessionXp <= 0.0) return 0.0;
-        return state.sessionXp * 1000.0 / elapsed;
+        return state.sessionXp * 3_600_000.0 / elapsed;
     }
 
     public static synchronized long sessionDurationMs(String name) {
@@ -220,18 +220,12 @@ public final class SkillsDataStore {
                 .replaceAll("\\.$", "");
     }
 
-    public static String formatRate(double xpPerSecond) {
-        if (xpPerSecond <= 0.0) return "-- XP/s";
-        if (xpPerSecond >= 1000.0) {
-            return String.format(Locale.US, "%,.1fK XP/s", xpPerSecond / 1000.0);
+    public static String formatRate(double xpPerHour) {
+        if (xpPerHour <= 0.0) return "-- XP/hr";
+        if (xpPerHour >= 1000.0) {
+            return String.format(Locale.US, "%,.1fK XP/hr", xpPerHour / 1000.0);
         }
-        if (xpPerSecond >= 100.0) {
-            return String.format(Locale.US, "%,.0f XP/s", xpPerSecond);
-        }
-        if (xpPerSecond >= 10.0) {
-            return String.format(Locale.US, "%,.1f XP/s", xpPerSecond);
-        }
-        return String.format(Locale.US, "%,.2f XP/s", xpPerSecond);
+        return String.format(Locale.US, "%,.0f XP/hr", xpPerHour);
     }
 
     private static final class RateState {
