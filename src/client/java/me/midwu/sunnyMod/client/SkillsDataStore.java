@@ -84,6 +84,11 @@ public final class SkillsDataStore {
         RateState state = RATES.computeIfAbsent(name, ignored -> new RateState(now));
         SkillProgress previous = SKILLS.get(name);
         if (previous != null) {
+            if (level > previous.level()) {
+                SkillsDebug.log("SKILLS_LEVEL_UP",
+                        name + " " + previous.level() + " -> " + level);
+                SkillsDebug.feedback(name + " leveled up: " + previous.level() + " -> " + level);
+            }
             updateRate(name, previous, level, current, required, now, state);
         } else {
             state.lastSampleTime = now;
@@ -188,6 +193,53 @@ public final class SkillsDataStore {
         RateState state = RATES.get(canonicalName(name));
         if (state == null || state.lastSampleTime == 0L) return 0L;
         return Math.max(0L, System.currentTimeMillis() - state.sessionStartTime);
+    }
+
+    public static synchronized double xpPerSecond(String name) {
+        return xpPerHour(name) / 3600.0;
+    }
+
+    public static synchronized double averageXpPerSecond(String name) {
+        return averageXpPerHour(name) / 3600.0;
+    }
+
+    /** Seconds until the next skill level at the current average XP/sec. */
+    public static synchronized long etaToNextLevelSeconds(String name) {
+        SkillProgress skill = get(name);
+        if (skill == null || skill.isMaxed()) return -1L;
+        double perSecond = averageXpPerSecond(name);
+        if (perSecond <= 0.0) return -1L;
+        return Math.max(0L, (long) Math.ceil(skill.remainingXp() / perSecond));
+    }
+
+    public static String formatRatePerSecond(double xpPerSecond) {
+        if (xpPerSecond <= 0.0) return "-- XP/s";
+        if (xpPerSecond >= 1000.0) {
+            return String.format(Locale.US, "%,.1fK XP/s", xpPerSecond / 1000.0);
+        }
+        if (xpPerSecond >= 10.0) {
+            return String.format(Locale.US, "%,.1f XP/s", xpPerSecond);
+        }
+        return String.format(Locale.US, "%.2f XP/s", xpPerSecond);
+    }
+
+    public static String formatDuration(long milliseconds) {
+        long totalSeconds = Math.max(0L, milliseconds / 1000L);
+        long hours = totalSeconds / 3600L;
+        long minutes = (totalSeconds % 3600L) / 60L;
+        long seconds = totalSeconds % 60L;
+        if (hours > 0) return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds);
+        return String.format(Locale.US, "%02d:%02d", minutes, seconds);
+    }
+
+    public static String formatEta(long seconds) {
+        if (seconds < 0) return "--";
+        long hours = seconds / 3600L;
+        long minutes = (seconds % 3600L) / 60L;
+        long secs = seconds % 60L;
+        if (hours > 0) return String.format(Locale.US, "%dh %02dm", hours, minutes);
+        if (minutes > 0) return String.format(Locale.US, "%dm %02ds", minutes, secs);
+        return String.format(Locale.US, "%ds", secs);
     }
 
     public static synchronized void resetRates() {

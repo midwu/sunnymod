@@ -188,6 +188,41 @@ public class Commands implements ClientModInitializer {
                         )
                 )
 
+                // ── skills ────────────────────────────────────────────────────────
+                .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("skills")
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("reset")
+                                .executes(context -> {
+                                    SkillsDataStore.resetRates();
+                                    MinecraftClient client = MinecraftClient.getInstance();
+                                    if (client.player != null) {
+                                        client.player.sendMessage(
+                                                Text.literal("§aSkills XP rate session reset"), false);
+                                    }
+                                    return 1;
+                                })
+                        )
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("status")
+                                .executes(context -> {
+                                    MinecraftClient client = MinecraftClient.getInstance();
+                                    if (client.player == null) return 1;
+                                    String active = SkillsDataStore.activeSkillName();
+                                    if (active == null) {
+                                        client.player.sendMessage(Text.literal(
+                                                "§7No active Skills progression bar"), false);
+                                        return 1;
+                                    }
+                                    SkillProgress skill = SkillsDataStore.get(active);
+                                    client.player.sendMessage(Text.literal(
+                                            "§e" + active + " §7Lv. " + skill.level()
+                                                    + " §f" + SkillsDataStore.formatRate(
+                                                    SkillsDataStore.averageXpPerHour(active))
+                                                    + " §7(" + SkillsDataStore.formatRatePerSecond(
+                                                    SkillsDataStore.averageXpPerSecond(active)) + ")"), false);
+                                    return 1;
+                                })
+                        )
+                )
+
                 // ── hud ───────────────────────────────────────────────────────────
                 .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("hud")
                         .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("edit")

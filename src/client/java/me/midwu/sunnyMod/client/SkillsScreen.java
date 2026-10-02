@@ -16,7 +16,7 @@ public final class SkillsScreen extends Screen {
     private static final int PAD = 14;
     private static final int HEADER_H = 58;
     private static final int FOOTER_H = 34;
-    private static final int ROW_H = 30;
+    private static final int ROW_H = 40;
     private static final int BAR_H = 7;
 
     private List<SkillProgress> rows = new ArrayList<>();
@@ -128,6 +128,18 @@ public final class SkillsScreen extends Screen {
             int remainingWidth = textRenderer.getWidth(remaining);
             ctx.drawText(textRenderer, remaining, width - PAD - remainingWidth, y + 8,
                     skill.isMaxed() ? 0xFF77DD77 : 0xFFAAAAAA, false);
+
+            double avg = SkillsDataStore.averageXpPerHour(skill.name());
+            String rate = avg > 0 ? SkillsDataStore.formatRate(avg) : "-- XP/hr";
+            String perSecond = avg > 0 ? SkillsDataStore.formatRatePerSecond(
+                    SkillsDataStore.averageXpPerSecond(skill.name())) : "-- XP/s";
+            ctx.drawText(textRenderer, rate + "  " + perSecond, barX, y + 24, 0xFF888888, false);
+
+            long eta = SkillsDataStore.etaToNextLevelSeconds(skill.name());
+            String etaText = skill.isMaxed() ? "MAX" : "ETA " + SkillsDataStore.formatEta(eta);
+            int etaWidth = textRenderer.getWidth(etaText);
+            ctx.drawText(textRenderer, etaText, width - PAD - etaWidth, y + 20,
+                    0xFF888888, false);
         }
 
         super.render(ctx, mouseX, mouseY, delta);
