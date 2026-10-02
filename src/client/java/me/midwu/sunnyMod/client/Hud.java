@@ -195,6 +195,8 @@ public class Hud implements ClientModInitializer {
             ctx.drawText(client.textRenderer, name, textX, cursor,
                     isActive ? COLOR_HEADER : COLOR_VALUE, true);
 
+            // Current rate: only XP from the last 1 second.
+            // This is intentionally different from averageXpPerSecond().
             String rate = SkillsDataStore.formatRatePerSecond(
                     SkillsDataStore.xpPerSecond(skill.name()));
             int rateWidth = client.textRenderer.getWidth(rate);

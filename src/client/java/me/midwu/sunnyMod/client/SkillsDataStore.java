@@ -16,6 +16,13 @@ import java.util.regex.Pattern;
  * for whichever skill is currently active.
  */
 public final class SkillsDataStore {
+    /**
+     * The HUD "current XP/s" rate is intentionally very short-lived.
+     * XP gained more than one second ago no longer contributes to this value.
+     * This makes the HUD drop back to 0 XP/s shortly after the player stops
+     * gaining skill XP, instead of behaving like a session/rolling average.
+     */
+    private static final long CURRENT_RATE_WINDOW_MS = 1_000L;
     private static final Pattern SKILL_BAR = Pattern.compile(
             "^\\s*(.+?)\\s*\\|\\s*Level\\s+(\\d+)\\s*\\|\\s*([0-9,.]+)\\s*/\\s*([0-9,.]+)\\s*XP\\s*$",
             Pattern.CASE_INSENSITIVE);
@@ -195,8 +202,35 @@ public final class SkillsDataStore {
         return Math.max(0L, System.currentTimeMillis() - state.sessionStartTime);
     }
 
+    /**
+     * Current XP/sec for the HUD.
+     *
+     * This is NOT the session average and NOT the 60-second XP/hour rate.
+     * It is simply the amount of XP observed during the last second.
+     * Once no XP has been observed for one second, this returns 0.
+     */
     public static synchronized double xpPerSecond(String name) {
-        return xpPerHour(name) / 3600.0;
+        RateState state = RATES.get(canonicalName(name));
+        if (state == null) return 0.0;
+
+        long now = System.currentTimeMillis();
+        pruneCurrentRateWindow(state, now);
+
+        if (state.window.isEmpty()) return 0.0;
+
+        double xp = state.window.stream()
+                .filter(sample -> now - sample.time <= CURRENT_RATE_WINDOW_MS)
+                .mapToDouble(sample -> sample.xp)
+                .sum();
+
+        return xp / (CURRENT_RATE_WINDOW_MS / 1000.0);
+    }
+
+    private static void pruneCurrentRateWindow(RateState state, long now) {
+        long cutoff = now - CURRENT_RATE_WINDOW_MS;
+        while (!state.window.isEmpty() && state.window.peekFirst().time <= cutoff) {
+            state.window.removeFirst();
+        }
     }
 
     public static synchronized double averageXpPerSecond(String name) {
@@ -213,7 +247,7 @@ public final class SkillsDataStore {
     }
 
     public static String formatRatePerSecond(double xpPerSecond) {
-        if (xpPerSecond <= 0.0) return "-- XP/s";
+        if (xpPerSecond <= 0.0) return "0 XP/s";
         if (xpPerSecond >= 1000.0) {
             return String.format(Locale.US, "%,.1fK XP/s", xpPerSecond / 1000.0);
         }
