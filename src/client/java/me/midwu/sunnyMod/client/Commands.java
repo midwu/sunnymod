@@ -188,6 +188,20 @@ public class Commands implements ClientModInitializer {
                         )
                 )
 
+                // ── chat repeater ────────────────────────────────────────────────
+                .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("chatrepeat")
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("reset")
+                                .executes(context -> {
+                                    SunnyModChatRepeater.reset();
+                                    MinecraftClient client = MinecraftClient.getInstance();
+                                    if (client.player != null) {
+                                        client.player.sendMessage(Text.literal("§aChat repeat filter reset"), false);
+                                    }
+                                    return 1;
+                                })
+                        )
+                )
+
                 // ── skills ────────────────────────────────────────────────────────
                 .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("skills")
                         .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("reset")

@@ -8,5 +8,6 @@ public class SunnyModClient implements ClientModInitializer {
     public void onInitializeClient() {
         // Client entrypoint — intentionally empty.
         // All feature initialization is handled by their respective classes.
+        SunnyModChatRepeater.init();
     }
 }
