@@ -1,23 +1,18 @@
 # Chat Repeat Filter
 
-SunnyMod collapses consecutive identical incoming chat messages into one visible line.
+SunnyMod collapses consecutive identical messages that reach the normal Minecraft `ChatHud`, including server/system messages such as:
 
-Example:
+`You unearthed something buried in the ground!`
 
-```text
-You unearthed something buried in the ground! (1x)
-```
+The first message is shown normally. Each subsequent identical message within 30 seconds replaces the newest chat entry with the same message plus a counter:
 
-The `(1x)` means one repeat after the initial message. Further identical messages update the same line to `(2x)`, `(3x)`, `(100x)`, etc.
+- first: `You unearthed something buried in the ground!`
+- first repeat: `You unearthed something buried in the ground! (1x)`
+- fifth repeat: `You unearthed something buried in the ground! (5x)`
+- hundredth repeat: `You unearthed something buried in the ground! (100x)`
 
-A new/different chat message starts a new entry. The same message starts a new burst if it has been quiet for more than 30 seconds.
+No additional chat line is added for the repeats.
 
-The filter currently applies to incoming player/chat messages exposed through Fabric's `ClientReceiveMessageEvents.ALLOW_CHAT` event. It does not change messages sent to the server.
+The filter works at the actual `ChatHud.addMessage(Text)` insertion point instead of the player-chat event, because server/system messages are delivered through a different path.
 
-Command:
-
-```text
-/sunnymod chatrepeat reset
-```
-
-This resets the current repeat state without clearing normal chat history.
+Use `/sunnymod chatrepeat reset` to clear the current repeat state.

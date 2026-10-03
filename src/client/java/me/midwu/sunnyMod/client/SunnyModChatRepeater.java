@@ -1,11 +1,10 @@
 package me.midwu.sunnyMod.client;
 
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.text.Text;
 
-/** Collapses consecutive identical incoming chat messages into one line with a repeat count. */
+/** Collapses consecutive identical chat/system messages into one line with a repeat count. */
 public final class SunnyModChatRepeater implements ClientModInitializer {
     /** A repeated message stays in the same burst for up to 30 seconds. */
     private static final long REPEAT_WINDOW_MS = 30_000L;
@@ -24,14 +23,20 @@ public final class SunnyModChatRepeater implements ClientModInitializer {
     public static void init() {
         if (initialized) return;
         initialized = true;
-
-        ClientReceiveMessageEvents.ALLOW_CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) ->
-                handle(message));
     }
 
-    private static boolean handle(Text message) {
-        String text = message == null ? "" : message.getString();
-        if (text.isEmpty() || replacing) return true;
+    /**
+     * Called directly from ChatHud.addMessage, so this catches both player chat
+     * and server/system messages that are rendered into the normal chat HUD.
+     *
+     * @return true when the incoming message should be displayed normally;
+     *         false when it was collapsed into the previous entry.
+     */
+    public static boolean handle(Text message) {
+        if (replacing || message == null) return true;
+
+        String text = message.getString();
+        if (text.isEmpty()) return true;
 
         long now = System.currentTimeMillis();
         boolean repeated = text.equals(lastMessage) && now - lastSeen <= REPEAT_WINDOW_MS;
@@ -46,15 +51,16 @@ public final class SunnyModChatRepeater implements ClientModInitializer {
         lastSeen = now;
         repeats++;
 
-        // Cancel the incoming duplicate and replace the existing visible entry.
-        // The chat therefore stays on one line while the count grows: (1x), (2x), ...
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.inGameHud == null) return true;
+
+        // Preserve the original message styling/components and only append the count.
+        Text replacement = message.copy().append(Text.literal(" (" + repeats + "x)"));
+
+        // Cancel the duplicate and replace the newest visible entry in-place.
         replacing = true;
         try {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (client.inGameHud != null) {
-                Text replacement = Text.literal(text + " (" + repeats + "x)");
-                SunnyModChatHudHelper.replaceLastMessage(client.inGameHud.getChatHud(), replacement);
-            }
+            SunnyModChatHudHelper.replaceLastMessage(client.inGameHud.getChatHud(), replacement);
         } finally {
             replacing = false;
         }
