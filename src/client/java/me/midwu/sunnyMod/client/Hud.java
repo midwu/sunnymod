@@ -72,7 +72,10 @@ public class Hud implements ClientModInitializer {
     }
 
     public static int getSkillsPanelHeight() {
-        int rows = SkillsDataStore.snapshot().size();
+        long now = System.currentTimeMillis();
+        int rows = (int) SkillsDataStore.snapshot().stream()
+                .filter(skill -> now - skill.updatedAt() <= SkillsDataStore.HUD_HIDE_DELAY_MS)
+                .count();
         return 18 + Math.max(1, rows) * 18 + 8;
     }
 
@@ -195,9 +198,14 @@ public class Hud implements ClientModInitializer {
 
         ctx.fill(x, y, x + width, y + height, COLOR_BG);
         String sessionLabel = "Session " + SkillsDataStore.formatDuration(SkillsDataStore.sessionDurationMs());
+        String rateLabel = SkillsDataStore.formatRatePerSecond(SkillsDataStore.currentSessionXpPerSecond());
         ctx.drawText(client.textRenderer, "Skills XP", textX, y + 5, COLOR_HEADER, true);
         int sessionWidth = client.textRenderer.getWidth(sessionLabel);
-        ctx.drawText(client.textRenderer, sessionLabel, x + width - 7 - sessionWidth, y + 5, COLOR_LABEL, false);
+        int rateWidthHeader = client.textRenderer.getWidth(rateLabel);
+        ctx.drawText(client.textRenderer, rateLabel, x + width - 7 - sessionWidth - 6 - rateWidthHeader,
+                y + 5, COLOR_VALUE, true);
+        ctx.drawText(client.textRenderer, sessionLabel, x + width - 7 - sessionWidth, y + 5,
+                COLOR_LABEL, false);
         ctx.fill(x + 5, y + 17, x + width - 5, y + 18, COLOR_DIVIDER);
 
         int cursor = y + 22;

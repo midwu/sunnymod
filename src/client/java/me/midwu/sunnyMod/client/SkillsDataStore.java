@@ -11,23 +11,18 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Live Skills model. The server's /skills menu is the authoritative snapshot
- * for all skills; the progression boss bar supplies high-frequency updates
- * for whichever skill is currently active.
+ * Live Skills model plus the analytics layer used by the HUD/dashboard.
+ * /skills is the authoritative snapshot; progression boss bars provide
+ * high-frequency updates for the currently active skill.
  */
 public final class SkillsDataStore {
-    /**
-     * The HUD "current XP/s" rate is intentionally very short-lived.
-     * XP gained more than one second ago no longer contributes to this value.
-     * This makes the HUD drop back to 0 XP/s shortly after the player stops
-     * gaining skill XP, instead of behaving like a session/rolling average.
-     */
     private static final long CURRENT_RATE_WINDOW_MS = 1_000L;
+    private static final long RATE_HISTORY_WINDOW_MS = 60_000L;
     public static final long HUD_HIDE_DELAY_MS = 5_000L;
+
     private static final Pattern SKILL_BAR = Pattern.compile(
             "^\\s*(.+?)\\s*\\|\\s*Level\\s+(\\d+)\\s*\\|\\s*([0-9,.]+)\\s*/\\s*([0-9,.]+)\\s*XP\\s*$",
             Pattern.CASE_INSENSITIVE);
-
     private static final Pattern MENU_SKILL = Pattern.compile(
             "^\\s*(.+?)\\s+Skill\\s*$", Pattern.CASE_INSENSITIVE);
 
@@ -40,18 +35,21 @@ public final class SkillsDataStore {
     private static final Map<String, RateState> RATES = new LinkedHashMap<>();
     private static String activeSkillName;
     private static long activeSkillUpdatedAt;
+    private static long sessionStartTime;
+    private static int sessionXpEvents;
+    private static int sessionLevelUps;
+    private static double sessionPeakXpPerSecond;
+    private static double observedMoney;
+    private static double observedJobXp;
 
     private SkillsDataStore() {}
 
-    /** Called by the live boss/progression bar. */
     public static synchronized boolean updateFromBossBar(String rawName, float percent) {
         if (rawName == null) return false;
         Matcher matcher = SKILL_BAR.matcher(rawName.trim());
         if (!matcher.matches()) return false;
-
         String name = canonicalName(matcher.group(1));
         if (name == null) return false;
-
         try {
             int level = Integer.parseInt(matcher.group(2));
             double current = parseNumber(matcher.group(3));
@@ -65,7 +63,6 @@ public final class SkillsDataStore {
         }
     }
 
-    /** Called by the /skills container scanner. */
     public static synchronized boolean updateFromMenu(
             String rawSkillName, int level, double currentXp, double requiredXp) {
         String name = canonicalName(rawSkillName);
@@ -76,28 +73,20 @@ public final class SkillsDataStore {
         return true;
     }
 
-    public static synchronized String activeSkillName() {
-        if (activeSkillName == null) return null;
-        if (System.currentTimeMillis() - activeSkillUpdatedAt > 5000L) return null;
-        return activeSkillName;
-    }
-
-    public static synchronized long activeSkillAgeMs() {
-        if (activeSkillName == null) return Long.MAX_VALUE;
-        return Math.max(0L, System.currentTimeMillis() - activeSkillUpdatedAt);
-    }
-
-    private static void update(String name, int level, double current, double required, float percent) {
+    private static void update(String name, int level, double current,
+                               double required, float percent) {
         long now = System.currentTimeMillis();
+        if (sessionStartTime == 0L) sessionStartTime = now;
+
         RateState state = RATES.computeIfAbsent(name, ignored -> new RateState(now));
         SkillProgress previous = SKILLS.get(name);
         if (previous != null) {
             if (level > previous.level()) {
-                SkillsDebug.log("SKILLS_LEVEL_UP",
-                        name + " " + previous.level() + " -> " + level);
+                sessionLevelUps++;
+                SkillsDebug.log("SKILLS_LEVEL_UP", name + " " + previous.level() + " -> " + level);
                 SkillsDebug.feedback(name + " leveled up: " + previous.level() + " -> " + level);
             }
-            updateRate(name, previous, level, current, required, now, state);
+            updateRate(previous, level, current, now, state);
         } else {
             state.lastSampleTime = now;
             state.lastLevel = level;
@@ -106,8 +95,8 @@ public final class SkillsDataStore {
         SKILLS.put(name, new SkillProgress(name, level, current, required, percent, now));
     }
 
-    private static void updateRate(String name, SkillProgress previous, int level,
-                                   double current, double required, long now, RateState state) {
+    private static void updateRate(SkillProgress previous, int level, double current,
+                                   long now, RateState state) {
         if (state.lastSampleTime == 0L) {
             state.lastSampleTime = now;
             state.lastLevel = previous.level();
@@ -118,15 +107,8 @@ public final class SkillsDataStore {
         double delta;
         if (level == state.lastLevel) {
             delta = current - state.lastXp;
-            if (delta < 0) {
-                // A decrease without a level change is normally a UI reset or
-                // stale packet. Do not turn it into negative XP/hour.
-                delta = 0;
-            }
+            if (delta < 0) delta = 0;
         } else if (level > state.lastLevel) {
-            // We may not receive the exact final pre-level-up bar value. Count
-            // the visible remainder plus the new level's progress. This keeps
-            // the HUD responsive; /skills snapshots can re-anchor the session.
             delta = Math.max(0.0, previous.requiredXp() - state.lastXp) + current;
         } else {
             delta = 0.0;
@@ -136,6 +118,9 @@ public final class SkillsDataStore {
         if (elapsed > 0 && delta > 0) {
             state.window.add(new RateSample(now, delta));
             state.sessionXp += delta;
+            sessionXpEvents++;
+            sessionPeakXpPerSecond = Math.max(sessionPeakXpPerSecond,
+                    delta / (elapsed / 1000.0));
         }
         pruneWindow(state, now);
         state.lastSampleTime = now;
@@ -144,7 +129,7 @@ public final class SkillsDataStore {
     }
 
     private static void pruneWindow(RateState state, long now) {
-        long cutoff = now - 60_000L;
+        long cutoff = now - RATE_HISTORY_WINDOW_MS;
         while (!state.window.isEmpty() && state.window.peekFirst().time < cutoff) {
             state.window.removeFirst();
         }
@@ -171,22 +156,48 @@ public final class SkillsDataStore {
         return List.copyOf(SKILLS.values());
     }
 
-    /** Returns true while this skill has received a server/menu update recently enough for the HUD. */
     public static boolean isHudFresh(SkillProgress skill) {
         return skill != null && System.currentTimeMillis() - skill.updatedAt() <= HUD_HIDE_DELAY_MS;
     }
 
-    /** Session duration since the first observed skill update. */
-    public static synchronized long sessionDurationMs() {
-        long earliest = Long.MAX_VALUE;
-        for (RateState state : RATES.values()) {
-            if (state.sessionStartTime > 0L) earliest = Math.min(earliest, state.sessionStartTime);
-        }
-        if (earliest == Long.MAX_VALUE) return 0L;
-        return Math.max(0L, System.currentTimeMillis() - earliest);
+    public static synchronized String activeSkillName() {
+        if (activeSkillName == null) return null;
+        if (System.currentTimeMillis() - activeSkillUpdatedAt > HUD_HIDE_DELAY_MS) return null;
+        return activeSkillName;
     }
 
-    /** Current rolling XP/hour, based on the last 60 seconds of observed XP. */
+    public static synchronized long activeSkillAgeMs() {
+        if (activeSkillName == null) return Long.MAX_VALUE;
+        return Math.max(0L, System.currentTimeMillis() - activeSkillUpdatedAt);
+    }
+
+    public static synchronized long sessionStartTime() {
+        return sessionStartTime;
+    }
+
+    public static synchronized long sessionDurationMs() {
+        if (sessionStartTime == 0L) return 0L;
+        return Math.max(0L, System.currentTimeMillis() - sessionStartTime);
+    }
+
+    public static synchronized double totalSessionXp() {
+        return RATES.values().stream().mapToDouble(state -> state.sessionXp).sum();
+    }
+
+    public static synchronized int sessionXpEvents() { return sessionXpEvents; }
+    public static synchronized int sessionLevelUps() { return sessionLevelUps; }
+    public static synchronized double sessionPeakXpPerSecond() { return sessionPeakXpPerSecond; }
+    public static synchronized double observedMoney() { return observedMoney; }
+    public static synchronized double observedJobXp() { return observedJobXp; }
+
+    public static synchronized void recordObservedMoney(double amount) {
+        if (sessionStartTime > 0L && amount > 0.0) observedMoney += amount;
+    }
+
+    public static synchronized void recordObservedJobXp(double amount) {
+        if (sessionStartTime > 0L && amount > 0.0) observedJobXp += amount;
+    }
+
     public static synchronized double xpPerHour(String name) {
         RateState state = RATES.get(canonicalName(name));
         if (state == null) return 0.0;
@@ -203,7 +214,6 @@ public final class SkillsDataStore {
         return state == null ? 0.0 : state.sessionXp;
     }
 
-    /** Average XP/hour over the whole observed session for this skill. */
     public static synchronized double averageXpPerHour(String name) {
         RateState state = RATES.get(canonicalName(name));
         if (state == null || state.sessionStartTime == 0L) return 0.0;
@@ -212,35 +222,36 @@ public final class SkillsDataStore {
         return state.sessionXp * 3_600_000.0 / elapsed;
     }
 
-    public static synchronized long sessionDurationMs(String name) {
-        RateState state = RATES.get(canonicalName(name));
-        if (state == null || state.lastSampleTime == 0L) return 0L;
-        return Math.max(0L, System.currentTimeMillis() - state.sessionStartTime);
+    public static synchronized double averageSessionXpPerHour() {
+        if (sessionStartTime == 0L || totalSessionXp() <= 0.0) return 0.0;
+        long elapsed = System.currentTimeMillis() - sessionStartTime;
+        if (elapsed < 1_000L) return 0.0;
+        return totalSessionXp() * 3_600_000.0 / elapsed;
     }
 
-    /**
-     * Current XP/sec for the HUD.
-     *
-     * This is NOT the session average and NOT the 60-second XP/hour rate.
-     * It is simply the amount of XP observed during the last second.
-     * Once no XP has been observed for one second, this returns 0.
-     */
+    public static synchronized double currentSessionXpPerSecond() {
+        if (sessionStartTime == 0L) return 0.0;
+        long now = System.currentTimeMillis();
+        double xp = 0.0;
+        for (RateState state : RATES.values()) {
+            xp += state.window.stream()
+                    .filter(sample -> now - sample.time >= 0L
+                            && now - sample.time < CURRENT_RATE_WINDOW_MS)
+                    .mapToDouble(sample -> sample.xp)
+                    .sum();
+        }
+        return xp / (CURRENT_RATE_WINDOW_MS / 1000.0);
+    }
+
     public static synchronized double xpPerSecond(String name) {
         RateState state = RATES.get(canonicalName(name));
         if (state == null) return 0.0;
-
         long now = System.currentTimeMillis();
-        if (state.window.isEmpty()) return 0.0;
-
-        // Do not mutate the 60-second history here. The same history is also
-        // used by xpPerHour() and by session statistics. Just look at the
-        // samples that fall inside the short current-rate window.
         double xp = state.window.stream()
                 .filter(sample -> now - sample.time >= 0L
                         && now - sample.time < CURRENT_RATE_WINDOW_MS)
                 .mapToDouble(sample -> sample.xp)
                 .sum();
-
         return xp / (CURRENT_RATE_WINDOW_MS / 1000.0);
     }
 
@@ -248,7 +259,12 @@ public final class SkillsDataStore {
         return averageXpPerHour(name) / 3600.0;
     }
 
-    /** Seconds until the next skill level at the current average XP/sec. */
+    public static synchronized long sessionDurationMs(String name) {
+        RateState state = RATES.get(canonicalName(name));
+        if (state == null || state.sessionStartTime == 0L) return 0L;
+        return Math.max(0L, System.currentTimeMillis() - state.sessionStartTime);
+    }
+
     public static synchronized long etaToNextLevelSeconds(String name) {
         SkillProgress skill = get(name);
         if (skill == null || skill.isMaxed()) return -1L;
@@ -257,14 +273,76 @@ public final class SkillsDataStore {
         return Math.max(0L, (long) Math.ceil(skill.remainingXp() / perSecond));
     }
 
+    public static synchronized SkillSessionSummary buildSessionSummary(long endedAt) {
+        Map<String, Double> bySkill = new LinkedHashMap<>();
+        for (String name : ORDER) {
+            double xp = sessionXp(name);
+            if (xp > 0.0) bySkill.put(name, xp);
+        }
+        for (SkillProgress skill : snapshot()) {
+            if (!bySkill.containsKey(skill.name())) {
+                double xp = sessionXp(skill.name());
+                if (xp > 0.0) bySkill.put(skill.name(), xp);
+            }
+        }
+        return new SkillSessionSummary(
+                sessionStartTime,
+                endedAt,
+                sessionDurationMs(),
+                totalSessionXp(),
+                sessionXpEvents,
+                sessionLevelUps,
+                sessionPeakXpPerSecond,
+                observedMoney,
+                observedJobXp,
+                bySkill);
+    }
+
+    /** Saves the current session without clearing live data. */
+    public static synchronized void saveCurrentSession() {
+        if (sessionStartTime == 0L || totalSessionXp() <= 0.0) return;
+        SkillsSessionHistory.add(buildSessionSummary(System.currentTimeMillis()));
+    }
+
+    /** Ends the current session, saving it when it contains XP. */
+    public static synchronized void endSession() {
+        saveCurrentSession();
+        RATES.clear();
+        sessionStartTime = 0L;
+        sessionXpEvents = 0;
+        sessionLevelUps = 0;
+        sessionPeakXpPerSecond = 0.0;
+        observedMoney = 0.0;
+        observedJobXp = 0.0;
+        activeSkillName = null;
+        activeSkillUpdatedAt = 0L;
+        SkillsResourceTracker.reset();
+    }
+
+    /** Saves the current session locally, then starts a clean analytics session. */
+    public static synchronized void resetRates() {
+        endSession();
+    }
+
+    public static String formatXp(double value) {
+        if (Math.abs(value - Math.rint(value)) < 0.000001) {
+            return String.format(Locale.US, "%,.0f", value);
+        }
+        return String.format(Locale.US, "%,.2f", value)
+                .replaceAll("0+$", "").replaceAll("\\.$", "");
+    }
+
+    public static String formatRate(double xpPerHour) {
+        if (xpPerHour <= 0.0) return "-- XP/hr";
+        if (xpPerHour >= 1_000_000.0) return String.format(Locale.US, "%,.2fM XP/hr", xpPerHour / 1_000_000.0);
+        if (xpPerHour >= 1000.0) return String.format(Locale.US, "%,.1fK XP/hr", xpPerHour / 1000.0);
+        return String.format(Locale.US, "%,.0f XP/hr", xpPerHour);
+    }
+
     public static String formatRatePerSecond(double xpPerSecond) {
         if (xpPerSecond <= 0.0) return "0 XP/s";
-        if (xpPerSecond >= 1000.0) {
-            return String.format(Locale.US, "%,.1fK XP/s", xpPerSecond / 1000.0);
-        }
-        if (xpPerSecond >= 10.0) {
-            return String.format(Locale.US, "%,.1f XP/s", xpPerSecond);
-        }
+        if (xpPerSecond >= 1000.0) return String.format(Locale.US, "%,.1fK XP/s", xpPerSecond / 1000.0);
+        if (xpPerSecond >= 10.0) return String.format(Locale.US, "%,.1f XP/s", xpPerSecond);
         return String.format(Locale.US, "%.2f XP/s", xpPerSecond);
     }
 
@@ -287,43 +365,16 @@ public final class SkillsDataStore {
         return String.format(Locale.US, "%ds", secs);
     }
 
-    public static synchronized void resetRates() {
-        RATES.clear();
-        activeSkillName = null;
-        activeSkillUpdatedAt = 0L;
-    }
-
     private static String canonicalName(String raw) {
         if (raw == null) return null;
         String clean = raw.trim().replaceAll("\\s+", " ");
         Matcher menu = MENU_SKILL.matcher(clean);
         if (menu.matches()) clean = menu.group(1).trim();
-        for (String known : ORDER) {
-            if (known.equalsIgnoreCase(clean)) return known;
-        }
+        for (String known : ORDER) if (known.equalsIgnoreCase(clean)) return known;
         return null;
     }
 
-    private static double parseNumber(String raw) {
-        return Double.parseDouble(raw.replace(",", ""));
-    }
-
-    public static String formatXp(double value) {
-        if (Math.abs(value - Math.rint(value)) < 0.000001) {
-            return String.format(Locale.US, "%,.0f", value);
-        }
-        return String.format(Locale.US, "%,.2f", value)
-                .replaceAll("0+$", "")
-                .replaceAll("\\.$", "");
-    }
-
-    public static String formatRate(double xpPerHour) {
-        if (xpPerHour <= 0.0) return "-- XP/hr";
-        if (xpPerHour >= 1000.0) {
-            return String.format(Locale.US, "%,.1fK XP/hr", xpPerHour / 1000.0);
-        }
-        return String.format(Locale.US, "%,.0f XP/hr", xpPerHour);
-    }
+    private static double parseNumber(String raw) { return Double.parseDouble(raw.replace(",", "")); }
 
     private static final class RateState {
         final java.util.ArrayDeque<RateSample> window = new java.util.ArrayDeque<>();
@@ -332,10 +383,7 @@ public final class SkillsDataStore {
         int lastLevel;
         double lastXp;
         double sessionXp;
-
-        RateState(long now) {
-            sessionStartTime = now;
-        }
+        RateState(long now) { sessionStartTime = now; }
     }
 
     private record RateSample(long time, double xp) {}

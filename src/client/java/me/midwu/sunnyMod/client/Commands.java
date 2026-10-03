@@ -233,6 +233,41 @@ public class Commands implements ClientModInitializer {
                                         })
                                 )
                         )
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("history")
+                                .executes(context -> {
+                                    MinecraftClient client = MinecraftClient.getInstance();
+                                    if (client.player == null) return 1;
+                                    java.util.List<SkillSessionSummary> history = SkillsSessionHistory.snapshot();
+                                    client.player.sendMessage(Text.literal(
+                                            "§eSkills history §7(" + history.size() + " saved sessions)"), false);
+                                    int shown = Math.min(5, history.size());
+                                    for (int i = 0; i < shown; i++) {
+                                        SkillSessionSummary s = history.get(i);
+                                        client.player.sendMessage(Text.literal(
+                                                "§7#" + (i + 1) + " §f" + s.duration()
+                                                        + " §e+" + SkillsDataStore.formatXp(s.totalSkillXp()) + " XP"
+                                                        + " §8(" + s.xpEvents() + " XP events)"), false);
+                                    }
+                                    return 1;
+                                })
+                                .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("clear")
+                                        .executes(context -> {
+                                            SkillsSessionHistory.clear();
+                                            MinecraftClient client = MinecraftClient.getInstance();
+                                            if (client.player != null) {
+                                                client.player.sendMessage(Text.literal("§aSkills session history cleared"), false);
+                                            }
+                                            return 1;
+                                        })
+                                )
+                        )
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("open")
+                                .executes(context -> {
+                                    MinecraftClient client = MinecraftClient.getInstance();
+                                    if (client.player != null) client.execute(() -> client.setScreen(new SkillsScreen()));
+                                    return 1;
+                                })
+                        )
                 )
 
                 // ── hud ───────────────────────────────────────────────────────────

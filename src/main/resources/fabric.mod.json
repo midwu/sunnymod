@@ -19,6 +19,8 @@
       "me.midwu.sunnyMod.client.SunnyModEventLogger",
       "me.midwu.sunnyMod.client.SunnyModClient",
       "me.midwu.sunnyMod.client.SkillsMenuScanner",
+      "me.midwu.sunnyMod.client.SkillsResourceTracker",
+      "me.midwu.sunnyMod.client.SkillsSessionLifecycle",
       "me.midwu.sunnyMod.client.ShopLogger",
       "me.midwu.sunnyMod.client.Hud",
       "me.midwu.sunnyMod.client.Commands",

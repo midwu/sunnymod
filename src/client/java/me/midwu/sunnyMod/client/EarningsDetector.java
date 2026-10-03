@@ -45,6 +45,7 @@ public class EarningsDetector implements ClientModInitializer {
                 double amount   = Double.parseDouble(matcher.group(3).replace(",", ""));
 
                 totalAmount += amount;
+                SkillsDataStore.recordObservedMoney(amount);
                 itemTotals.put(itemName, itemTotals.getOrDefault(itemName, 0) + quantity);
                 lastSaleTimestamp = System.currentTimeMillis();
 

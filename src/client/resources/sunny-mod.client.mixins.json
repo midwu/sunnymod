@@ -5,7 +5,6 @@
   "compatibilityLevel": "JAVA_21",
   "client": [
     "SunnyModBossBarHudAccessor",
-    "SunnyModBossBarHudMixin",
     "SunnyModDataPacketMixin",
     "SunnyModInGameHudMixin",
     "SunnyModClientPlayNetworkHandlerMixin"

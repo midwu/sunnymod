@@ -60,10 +60,14 @@ public final class SkillsMenuScanner implements ClientModInitializer {
             if (stack.isEmpty()) continue;
 
             String displayName = stack.getName().getString();
-            if (!displayName.toLowerCase().endsWith(" skill")) continue;
-
             List<Text> tooltip = stack.getTooltip(
                     Item.TooltipContext.DEFAULT, client.player, TooltipType.BASIC);
+            List<String> rawTooltip = tooltip.stream()
+                    .map(Text::getString)
+                    .filter(line -> !line.isBlank())
+                    .toList();
+            SkillsMenuCatalog.update(displayName, rawTooltip);
+            if (!displayName.toLowerCase().endsWith(" skill")) continue;
 
             int level = -1;
             double current = -1;

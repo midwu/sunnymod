@@ -40,7 +40,15 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientPlayNetworkHandler.class)
 public abstract class SunnyModDataPacketMixin {
 
+    private static final java.util.Set<String> USEFUL_PACKET_LOGS = java.util.Set.of(
+            "PACKET_OPEN_SCREEN", "PACKET_ACTIONBAR", "PACKET_BOSSBAR",
+            "PACKET_INVENTORY", "PACKET_PLAYER_INVENTORY", "PACKET_STATISTICS",
+            "PACKET_SCOREBOARD_OBJECTIVE", "PACKET_SCOREBOARD_DISPLAY",
+            "PACKET_SCOREBOARD_SCORE", "PACKET_SCOREBOARD_SCORE_RESET",
+            "PACKET_CUSTOM_PAYLOAD");
+
     private static void log(String type, Object packet) {
+        if (!USEFUL_PACKET_LOGS.contains(type)) return;
         SunnyModEventLogger.write(type, String.valueOf(packet));
     }
 
