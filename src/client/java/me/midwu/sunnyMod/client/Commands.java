@@ -205,21 +205,33 @@ public class Commands implements ClientModInitializer {
                                 .executes(context -> {
                                     MinecraftClient client = MinecraftClient.getInstance();
                                     if (client.player == null) return 1;
-                                    String active = SkillsDataStore.activeSkillName();
-                                    if (active == null) {
-                                        client.player.sendMessage(Text.literal(
-                                                "§7No active Skills progression bar"), false);
-                                        return 1;
-                                    }
-                                    SkillProgress skill = SkillsDataStore.get(active);
                                     client.player.sendMessage(Text.literal(
-                                            "§e" + active + " §7Lv. " + skill.level()
-                                                    + " §f" + SkillsDataStore.formatRate(
-                                                    SkillsDataStore.averageXpPerHour(active))
-                                                    + " §7(" + SkillsDataStore.formatRatePerSecond(
-                                                    SkillsDataStore.averageXpPerSecond(active)) + ")"), false);
+                                            "§eSkills session §7" + SkillsDataStore.formatDuration(
+                                                    SkillsDataStore.sessionDurationMs())), false);
+                                    for (SkillProgress skill : SkillsDataStore.snapshot()) {
+                                        if (SkillsDataStore.sessionXp(skill.name()) <= 0.0) continue;
+                                        client.player.sendMessage(Text.literal(
+                                                "§e" + skill.name() + " §7Lv. " + skill.level()
+                                                        + " §f+" + SkillsDataStore.formatXp(
+                                                        SkillsDataStore.sessionXp(skill.name())) + " XP"
+                                                        + " §7(" + SkillsDataStore.formatRatePerSecond(
+                                                        SkillsDataStore.averageXpPerSecond(skill.name())) + " avg)"), false);
+                                    }
                                     return 1;
                                 })
+                        )
+                        .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("session")
+                                .then(LiteralArgumentBuilder.<FabricClientCommandSource>literal("reset")
+                                        .executes(context -> {
+                                            SkillsDataStore.resetRates();
+                                            MinecraftClient client = MinecraftClient.getInstance();
+                                            if (client.player != null) {
+                                                client.player.sendMessage(Text.literal(
+                                                        "§aSkills session reset"), false);
+                                            }
+                                            return 1;
+                                        })
+                                )
                         )
                 )
 

@@ -67,6 +67,15 @@ public class Hud implements ClientModInitializer {
         return ContainerWorthHud.getPanelHeight();
     }
 
+    public static int getSkillsPanelWidth() {
+        return 285;
+    }
+
+    public static int getSkillsPanelHeight() {
+        int rows = SkillsDataStore.snapshot().size();
+        return 18 + Math.max(1, rows) * 18 + 8;
+    }
+
     // ── Auto-hide logic ───────────────────────────────────────────────────────
 
     private boolean earningsShouldAutoHide() {
@@ -160,28 +169,35 @@ public class Hud implements ClientModInitializer {
                     if (cfg.worthVisible && !worthShouldAutoHide())
                         ContainerWorthHud.render(ctx, client, cfg.worthX, cfg.worthY);
                 }
+                case "skills"   -> {
+                    if (cfg.skillsVisible)
+                        renderSkillsXpPanel(ctx, client, cfg.skillsX, cfg.skillsY);
+                }
             }
         }
 
-        renderSkillsXpPanel(ctx, client);
     }
 
     // ── Live Skills XP panel ──────────────────────────────────────────────────
 
-    private void renderSkillsXpPanel(DrawContext ctx, MinecraftClient client) {
-        java.util.List<SkillProgress> skills = SkillsDataStore.snapshot();
+    private void renderSkillsXpPanel(DrawContext ctx, MinecraftClient client, int x, int y) {
+        java.util.List<SkillProgress> allSkills = SkillsDataStore.snapshot();
+        java.util.List<SkillProgress> skills = allSkills.stream()
+                .filter(SkillsDataStore::isHudFresh)
+                .toList();
         if (skills.isEmpty()) return;
 
-        final int width = 285;
+        final int width = getSkillsPanelWidth();
         final int rowHeight = 18;
         final int height = 18 + skills.size() * rowHeight + 8;
-        final int x = client.getWindow().getScaledWidth() - width - 8;
-        final int y = 52;
         final int textX = x + 7;
         final String active = SkillsDataStore.activeSkillName();
 
         ctx.fill(x, y, x + width, y + height, COLOR_BG);
+        String sessionLabel = "Session " + SkillsDataStore.formatDuration(SkillsDataStore.sessionDurationMs());
         ctx.drawText(client.textRenderer, "Skills XP", textX, y + 5, COLOR_HEADER, true);
+        int sessionWidth = client.textRenderer.getWidth(sessionLabel);
+        ctx.drawText(client.textRenderer, sessionLabel, x + width - 7 - sessionWidth, y + 5, COLOR_LABEL, false);
         ctx.fill(x + 5, y + 17, x + width - 5, y + 18, COLOR_DIVIDER);
 
         int cursor = y + 22;
@@ -195,8 +211,6 @@ public class Hud implements ClientModInitializer {
             ctx.drawText(client.textRenderer, name, textX, cursor,
                     isActive ? COLOR_HEADER : COLOR_VALUE, true);
 
-            // Current rate: only XP from the last 1 second.
-            // This is intentionally different from averageXpPerSecond().
             String rate = SkillsDataStore.formatRatePerSecond(
                     SkillsDataStore.xpPerSecond(skill.name()));
             int rateWidth = client.textRenderer.getWidth(rate);
@@ -205,9 +219,9 @@ public class Hud implements ClientModInitializer {
 
             String session = "+" + SkillsDataStore.formatXp(
                     SkillsDataStore.sessionXp(skill.name())) + " XP";
-            int sessionWidth = client.textRenderer.getWidth(session);
+            int rowSessionWidth = client.textRenderer.getWidth(session);
             ctx.drawText(client.textRenderer, session,
-                    x + width - 14 - rateWidth - sessionWidth, cursor, COLOR_LABEL, false);
+                    x + width - 14 - rateWidth - rowSessionWidth, cursor, COLOR_LABEL, false);
 
             cursor += rowHeight;
         }
@@ -303,6 +317,7 @@ public class Hud implements ClientModInitializer {
             case "shop"     -> cfg.shopY;
             case "sign"     -> cfg.signY;
             case "worth"    -> cfg.worthY;
+            case "skills"   -> cfg.skillsY;
             default -> 0;
         };
     }
@@ -314,6 +329,7 @@ public class Hud implements ClientModInitializer {
             case "shop"     -> cfg.shopY     = y;
             case "sign"     -> cfg.signY     = y;
             case "worth"    -> cfg.worthY    = y;
+            case "skills"   -> cfg.skillsY   = y;
         }
     }
 

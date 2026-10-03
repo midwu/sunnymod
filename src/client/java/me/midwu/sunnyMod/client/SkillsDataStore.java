@@ -23,6 +23,7 @@ public final class SkillsDataStore {
      * gaining skill XP, instead of behaving like a session/rolling average.
      */
     private static final long CURRENT_RATE_WINDOW_MS = 1_000L;
+    public static final long HUD_HIDE_DELAY_MS = 5_000L;
     private static final Pattern SKILL_BAR = Pattern.compile(
             "^\\s*(.+?)\\s*\\|\\s*Level\\s+(\\d+)\\s*\\|\\s*([0-9,.]+)\\s*/\\s*([0-9,.]+)\\s*XP\\s*$",
             Pattern.CASE_INSENSITIVE);
@@ -170,6 +171,21 @@ public final class SkillsDataStore {
         return List.copyOf(SKILLS.values());
     }
 
+    /** Returns true while this skill has received a server/menu update recently enough for the HUD. */
+    public static boolean isHudFresh(SkillProgress skill) {
+        return skill != null && System.currentTimeMillis() - skill.updatedAt() <= HUD_HIDE_DELAY_MS;
+    }
+
+    /** Session duration since the first observed skill update. */
+    public static synchronized long sessionDurationMs() {
+        long earliest = Long.MAX_VALUE;
+        for (RateState state : RATES.values()) {
+            if (state.sessionStartTime > 0L) earliest = Math.min(earliest, state.sessionStartTime);
+        }
+        if (earliest == Long.MAX_VALUE) return 0L;
+        return Math.max(0L, System.currentTimeMillis() - earliest);
+    }
+
     /** Current rolling XP/hour, based on the last 60 seconds of observed XP. */
     public static synchronized double xpPerHour(String name) {
         RateState state = RATES.get(canonicalName(name));
@@ -214,23 +230,18 @@ public final class SkillsDataStore {
         if (state == null) return 0.0;
 
         long now = System.currentTimeMillis();
-        pruneCurrentRateWindow(state, now);
-
         if (state.window.isEmpty()) return 0.0;
 
+        // Do not mutate the 60-second history here. The same history is also
+        // used by xpPerHour() and by session statistics. Just look at the
+        // samples that fall inside the short current-rate window.
         double xp = state.window.stream()
-                .filter(sample -> now - sample.time <= CURRENT_RATE_WINDOW_MS)
+                .filter(sample -> now - sample.time >= 0L
+                        && now - sample.time < CURRENT_RATE_WINDOW_MS)
                 .mapToDouble(sample -> sample.xp)
                 .sum();
 
         return xp / (CURRENT_RATE_WINDOW_MS / 1000.0);
-    }
-
-    private static void pruneCurrentRateWindow(RateState state, long now) {
-        long cutoff = now - CURRENT_RATE_WINDOW_MS;
-        while (!state.window.isEmpty() && state.window.peekFirst().time <= cutoff) {
-            state.window.removeFirst();
-        }
     }
 
     public static synchronized double averageXpPerSecond(String name) {
