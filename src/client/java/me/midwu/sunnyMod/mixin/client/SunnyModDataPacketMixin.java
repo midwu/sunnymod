@@ -1,6 +1,9 @@
 package me.midwu.sunnyMod.mixin.client;
 
+import me.midwu.sunnyMod.client.SignDump;
 import me.midwu.sunnyMod.client.SunnyModEventLogger;
+import net.minecraft.block.entity.BlockEntityType;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
 import net.minecraft.network.packet.s2c.play.AdvancementUpdateS2CPacket;
 import net.minecraft.network.packet.s2c.play.BossBarS2CPacket;
@@ -50,6 +53,15 @@ public abstract class SunnyModDataPacketMixin {
     private static void log(String type, Object packet) {
         if (!USEFUL_PACKET_LOGS.contains(type)) return;
         SunnyModEventLogger.write(type, String.valueOf(packet));
+    }
+
+    @Inject(method = "onBlockEntityUpdate", at = @At("HEAD"))
+    private void sunnymod$blockEntityUpdate(BlockEntityUpdateS2CPacket packet, CallbackInfo ci) {
+        if (!SignDump.isLoggingPackets()) return;
+        if (packet.getBlockEntityType() != BlockEntityType.SIGN
+                && packet.getBlockEntityType() != BlockEntityType.HANGING_SIGN) return;
+        SunnyModEventLogger.write("PACKET_SIGN_UPDATE",
+                packet.getPos().toShortString() + " " + packet.getNbt());
     }
 
     @Inject(method = "onOpenScreen", at = @At("HEAD"))

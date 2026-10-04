@@ -9,5 +9,6 @@ public class SunnyModClient implements ClientModInitializer {
         // Client entrypoint — intentionally empty.
         // All feature initialization is handled by their respective classes.
         SunnyModChatRepeater.init();
+        SignDump.init();
     }
 }
