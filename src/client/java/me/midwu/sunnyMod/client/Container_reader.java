@@ -390,14 +390,14 @@ public class Container_reader implements ClientModInitializer {
                 opps.add(new AuctionProfitScreen.Opp(
                         "AH→Shop", L.displayName, L.vanillaName, L.seller, L.listingType,
                         L.price, shopBuys.price, profit,
-                        shopBuys.owner, shopBuys.warp, L.count));
+                        shopBuys.owner, shopBuys.warp, shopBuys.location, L.count));
             }
             if (shopSells != null && L.price < shopSells.price) {
                 double save = (shopSells.price - L.price) * L.count;
                 opps.add(new AuctionProfitScreen.Opp(
                         "AH cheaper", L.displayName, L.vanillaName, L.seller, L.listingType,
                         L.price, shopSells.price, save,
-                        shopSells.owner, shopSells.warp, L.count));
+                        shopSells.owner, shopSells.warp, shopSells.location, L.count));
             }
             // AH costs more than a player shop SELLING — you'd overpay on AH
             if (shopSells != null && L.price > shopSells.price) {
@@ -405,7 +405,7 @@ public class Container_reader implements ClientModInitializer {
                 opps.add(new AuctionProfitScreen.Opp(
                         "Shop cheaper", L.displayName, L.vanillaName, L.seller, L.listingType,
                         L.price, shopSells.price, overpay,
-                        shopSells.owner, shopSells.warp, L.count));
+                        shopSells.owner, shopSells.warp, shopSells.location, L.count));
             }
         }
 

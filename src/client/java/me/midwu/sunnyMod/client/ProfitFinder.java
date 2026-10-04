@@ -368,16 +368,6 @@ public final class ProfitFinder {
     }
 
     /**
-     * Synthetic shop sources that must never be directly compared against each other.
-     * Industry is a zero-cost source and the server shop is a server buy sink; treating
-     * them as a normal shop-to-shop flip creates meaningless profit opportunities.
-     */
-    private static boolean isIndustryServerPair(String ownerA, String ownerB) {
-        return ("__industry__".equalsIgnoreCase(ownerA) && "__server__".equalsIgnoreCase(ownerB))
-                || ("__server__".equalsIgnoreCase(ownerA) && "__industry__".equalsIgnoreCase(ownerB));
-    }
-
-    /**
      * Shops sitting at "out of stock" / "out of space" — invisible to findFlips/findSelfFlips —
      * ranked by how worth re-visiting they are: estimated payoff if restocked, weighted by
      * staleness, and faded out the more times in a row a rescan has found nothing new.
@@ -459,12 +449,10 @@ public final class ProfitFinder {
             double bestEdge = 0;
             if ("SELLING".equalsIgnoreCase(action)) {
                 for (Listing b : activeBuyers) {
-                    if (isIndustryServerPair(owner, b.owner)) continue;
                     if (b.item.equalsIgnoreCase(item)) bestEdge = Math.max(bestEdge, b.price - price);
                 }
             } else if ("BUYING".equalsIgnoreCase(action)) {
                 for (Listing sel : activeSellers) {
-                    if (isIndustryServerPair(owner, sel.owner)) continue;
                     if (sel.item.equalsIgnoreCase(item)) bestEdge = Math.max(bestEdge, price - sel.price);
                 }
             }
@@ -620,8 +608,6 @@ public final class ProfitFinder {
             List<Listing> bs = buyersByItem.get(s.item.toLowerCase(Locale.ROOT));
             if (bs == null) continue;
             for (Listing b : bs) {
-                // Never turn the synthetic Industry supply into a direct Server-shop flip.
-                if (isIndustryServerPair(s.owner, b.owner)) continue;
                 boolean sameOwner = s.owner.equalsIgnoreCase(b.owner);
                 if (selfFlip) {
                     if (!sameOwner) continue;

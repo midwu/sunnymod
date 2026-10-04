@@ -1,5 +1,7 @@
 package me.midwu.sunnyMod.client;
 
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.Click;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.widget.ButtonWidget;
@@ -59,11 +61,12 @@ public class AuctionProfitScreen extends Screen {
     public final double edge;
     public final String shopOwner;
     public final String shopWarp;
+    public final String shopLocation;
     public final int count;
 
     public Opp(String kind, String displayName, String vanillaName, String seller,
                String listingType, double ahPrice, double shopPrice, double edge,
-               String shopOwner, String shopWarp, int count) {
+               String shopOwner, String shopWarp, String shopLocation, int count) {
       this.kind = kind;
       this.displayName = displayName;
       this.vanillaName = vanillaName;
@@ -74,6 +77,7 @@ public class AuctionProfitScreen extends Screen {
       this.edge = edge;
       this.shopOwner = shopOwner != null ? shopOwner : "";
       this.shopWarp = shopWarp != null ? shopWarp : "";
+      this.shopLocation = shopLocation != null ? shopLocation : "";
       this.count = count;
     }
 
@@ -224,6 +228,12 @@ public class AuctionProfitScreen extends Screen {
               : String.format(Locale.US, "+$%,.0f", o.edge);
       ctx.drawText(textRenderer, edgeStr, this.width - PAD - 90, rowY + 4, edgeColor, false);
 
+      if (!o.shopWarp.isBlank() && !o.shopLocation.isBlank()) {
+        int warpX = this.width - PAD - 52;
+        ctx.fill(warpX - 3, rowY + 1, this.width - PAD, rowY + ROW_HEIGHT - 3, 0x5544AAFF);
+        ctx.drawText(textRenderer, "Warp", warpX, rowY + 4, 0xFF66CCFF, false);
+      }
+
       if (hover) {
         List<Text> tip = new ArrayList<>();
         tip.add(Text.literal(o.kind + " · " + o.listingType));
@@ -233,6 +243,7 @@ public class AuctionProfitScreen extends Screen {
         if (!o.shopOwner.isEmpty()) {
           String warp = o.shopWarp.isEmpty() ? "" : "  /" + o.shopWarp.replaceFirst("^/+", "");
           tip.add(Text.literal("Shop: " + o.shopOwner + warp));
+          if (!o.shopLocation.isEmpty()) tip.add(Text.literal("Click Warp to highlight: " + o.shopLocation));
         }
         if (o.isOverpay()) {
           tip.add(Text.literal("§cBuy from the player shop instead of AH"));
@@ -252,6 +263,53 @@ public class AuctionProfitScreen extends Screen {
             this.width / 2 - 20, this.height - FOOTER_H + 8, 0xFFAAAAAA, false);
 
     super.render(ctx, mouseX, mouseY, delta);
+  }
+
+  /** Warp to the matched shop and highlight the exact shop_data location. */
+  private void warpToShopAndHighlight(Opp o) {
+    if (o == null || o.shopWarp.isBlank() || o.shopLocation.isBlank()) return;
+    MinecraftClient client = MinecraftClient.getInstance();
+    if (client.player == null) return;
+
+    String warp = o.shopWarp.trim();
+    String cmd = warp;
+    if (cmd.startsWith("/")) cmd = cmd.substring(1);
+    if (!cmd.toLowerCase(Locale.ROOT).startsWith("warp ")) {
+      cmd = "warp " + cmd;
+    }
+
+    System.out.println("[AuctionProfitScreen] Warping to shop " + warp
+            + " and highlighting " + o.shopLocation);
+    client.player.networkHandler.sendChatCommand(cmd);
+    ShopHighlighter.activateForLocations(warp.replaceFirst("^/warp\\s+", ""),
+            List.of(o.shopLocation));
+    close();
+  }
+
+  @Override
+  public boolean mouseClicked(Click click, boolean doubled) {
+    double mouseX = click.x();
+    double mouseY = click.y();
+    int button = click.button();
+    if (button == 0) {
+      int listTop = HEADER_H;
+      int listBottom = this.height - FOOTER_H;
+      int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+      int row = (int) ((mouseY - listTop) / ROW_HEIGHT);
+      int warpX = this.width - PAD - 52;
+      if (mouseX >= warpX && mouseX <= this.width - PAD
+              && row >= 0 && row < visibleRows) {
+        int idx = scrollOffset + row;
+        if (idx >= 0 && idx < visible.size()) {
+          Opp o = visible.get(idx);
+          if (!o.shopWarp.isBlank() && !o.shopLocation.isBlank()) {
+            warpToShopAndHighlight(o);
+            return true;
+          }
+        }
+      }
+    }
+    return super.mouseClicked(click, doubled);
   }
 
   @Override

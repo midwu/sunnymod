@@ -724,7 +724,8 @@ public class ProfitScreen extends Screen {
             if (!e.warp.isBlank()) {
                 ButtonWidget warpBtn = ButtonWidget.builder(
                                 Text.literal(shortWarp(e.warp, SEARCH_WARP_NAME_MAX_CHARS)),
-                                b -> runWarpCommand(e.warp)
+                                b -> runWarpCommandAndHighlightLocations(
+                                        e.warp, List.of(e.location))
                         ).dimensions(warpBtnX, rowY, SEARCH_WARP_BTN_W, 16)
                         .tooltip(Tooltip.of(Text.literal("Warp to: " + e.warp)))
                         .build();
