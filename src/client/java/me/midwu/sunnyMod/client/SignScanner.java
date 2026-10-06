@@ -19,6 +19,7 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.chunk.WorldChunk;
+import org.lwjgl.glfw.GLFW;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -36,7 +37,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * Passive shop-sign scanner.
@@ -53,7 +53,7 @@ public final class SignScanner {
 
     private static final Pattern ACTION = Pattern.compile("^(Selling|Buying|Out of Stock|Out of Space)\\b(?:\\s+(\\d[\\d,]*))?.*$",
             Pattern.CASE_INSENSITIVE);
-    private static final Pattern PRICE = Pattern.compile("\\$\\s*([0-9][0-9,]*(?:\\.[0-9]+)?)");
+    private static final Pattern PRICE = Pattern.compile("\\$\\s*([0-9][\\d,]*(?:\\.[0-9]+)?)");
 
     private static boolean initialized;
     private static KeyBinding scanKey;
@@ -175,7 +175,6 @@ public final class SignScanner {
         // The item and owner are intentionally taken from the plain rendered text,
         // so colour/font components do not affect matching.
 
-
         Matcher pm = PRICE.matcher(lines[3]);
         if (!pm.find()) return null;
         double price;
@@ -260,6 +259,20 @@ public final class SignScanner {
                     existing.put(row.location, normalized);
                     changed++;
                 }
+                // FIX: even when the sign itself is unchanged, keep the Warp column
+                // in sync with the warp the player was at when the sign was last seen.
+                String[] cur = existing.get(row.location);
+                if (!warp.isEmpty() && !field(cur, 8).equalsIgnoreCase(warp)) {
+                    if (cur.length < 11) {
+                        String[] normalized = new String[11];
+                        System.arraycopy(cur, 0, normalized, 0, cur.length);
+                        normalized[10] = "sign";
+                        cur = normalized;
+                    }
+                    cur[8] = warp;
+                    existing.put(row.location, cur);
+                    changed++;
+                }
                 continue;
             }
 
@@ -270,9 +283,13 @@ public final class SignScanner {
             } else if (old != null && "sign".equalsIgnoreCase(oldSource)) {
                 streak = 0;
             }
+            // FIX: never overwrite a previously known warp with an empty one
+            // (currentWarp is empty until the player sends /warp this session).
+            String effectiveWarp = warp;
+            if (effectiveWarp.isEmpty() && old != null) effectiveWarp = field(old, 8);
             String[] replacement = {
                     row.location, row.owner, row.item, String.valueOf(row.stock),
-                    number(row.price), action, row.status, now, warp, String.valueOf(streak), "sign"
+                    number(row.price), action, row.status, now, effectiveWarp, String.valueOf(streak), "sign"
             };
             existing.put(row.location, replacement);
             changed++;
