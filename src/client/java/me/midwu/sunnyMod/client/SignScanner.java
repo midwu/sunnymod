@@ -333,19 +333,27 @@ public final class SignScanner {
                     && field(old, 5).equalsIgnoreCase(action)
                     && field(old, 6).equalsIgnoreCase(row.status);
             if (unchanged) {
+                // Use the already-fetched `old` reference rather than re-fetching
+                // from the map. Re-fetching could return null if the location key
+                // in the CSV does not round-trip identically to row.location,
+                // which previously caused a NullPointerException in field().
+                String[] cur = old;
+
                 // Legacy shop_data.csv files had no Source column. Treat those
                 // records as chat-origin data and normalize the row once so the
                 // freshness guard works on the next scan too.
-                if (old.length < 11) {
+                if (cur.length < 11) {
                     String[] normalized = new String[11];
-                    System.arraycopy(old, 0, normalized, 0, old.length);
+                    System.arraycopy(cur, 0, normalized, 0, cur.length);
                     normalized[10] = "chat";
-                    existing.put(row.location, normalized);
+                    cur = normalized;
+                    existing.put(row.location, cur);
                 }
+
                 // FIX: even when the sign itself is unchanged, keep the Warp column
                 // in sync with the warp the player was at when the sign was last seen.
-                String[] cur = existing.get(row.location);
                 if (!warp.isEmpty() && !field(cur, 8).equalsIgnoreCase(warp)) {
+                    // Make sure the row has the full 11 columns before writing index 8.
                     if (cur.length < 11) {
                         String[] normalized = new String[11];
                         System.arraycopy(cur, 0, normalized, 0, cur.length);
@@ -470,11 +478,14 @@ public final class SignScanner {
     }
 
     private static boolean sameRow(String[] a, String[] b) {
+        if (a == null || b == null) return false;
         for (int i = 0; i < 11; i++) if (!field(a,i).equals(field(b,i))) return false;
         return true;
     }
 
+    /** Null-safe field access. Returns "" if the array is null or the index is out of range. */
     private static String field(String[] a, int i) {
+        if (a == null) return "";
         return i < a.length ? a[i].trim() : "";
     }
 
