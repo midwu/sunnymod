@@ -63,10 +63,20 @@ public final class ProfitFinder {
         public final double totalProfit;
         public final double capital;
         public final boolean selfFlip;
+        public final boolean sellerStockFromSign;
+        public final boolean buyerStockFromSign;
 
         public Trade(String item, String seller, String sellerWarp, String sellerLocation,
                      double sellPrice, String buyer, String buyerWarp, String buyerLocation,
                      double buyPrice, int quantity, double profitPerItem, boolean selfFlip) {
+            this(item, seller, sellerWarp, sellerLocation, sellPrice, buyer, buyerWarp, buyerLocation,
+                    buyPrice, quantity, profitPerItem, selfFlip, false, false);
+        }
+
+        public Trade(String item, String seller, String sellerWarp, String sellerLocation,
+                     double sellPrice, String buyer, String buyerWarp, String buyerLocation,
+                     double buyPrice, int quantity, double profitPerItem, boolean selfFlip,
+                     boolean sellerStockFromSign, boolean buyerStockFromSign) {
             this.item = item;
             this.seller = seller;
             this.sellerWarp = sellerWarp != null ? sellerWarp : "";
@@ -79,6 +89,8 @@ public final class ProfitFinder {
             this.quantity = quantity;
             this.profitPerItem = profitPerItem;
             this.selfFlip = selfFlip;
+            this.sellerStockFromSign = sellerStockFromSign;
+            this.buyerStockFromSign = buyerStockFromSign;
             this.totalProfit = selfFlip ? profitPerItem : profitPerItem * Math.max(0, quantity);
             this.capital = selfFlip ? sellPrice : sellPrice * Math.max(0, quantity);
         }
@@ -213,9 +225,10 @@ public final class ProfitFinder {
         final int stock;
         final int id;
         final long epochMs;
+        final boolean signStock;
 
         Listing(String item, String owner, String warp, String location,
-                double price, int stock, int id, long epochMs) {
+                double price, int stock, int id, long epochMs, boolean signStock) {
             this.item = item;
             this.owner = owner;
             this.warp = warp;
@@ -224,6 +237,7 @@ public final class ProfitFinder {
             this.stock = stock;
             this.id = id;
             this.epochMs = epochMs;
+            this.signStock = signStock;
         }
     }
 
@@ -421,7 +435,7 @@ public final class ProfitFinder {
                 long epochMs = parseTimestampMs(timestamp);
 
                 if ("Active".equalsIgnoreCase(status)) {
-                    Listing L = new Listing(item, owner, warp, "", price, 1, nextId++, epochMs);
+                    Listing L = new Listing(item, owner, warp, "", price, 1, nextId++, epochMs, "sign".equalsIgnoreCase(p.length > 10 ? p[10].trim() : ""));
                     if ("SELLING".equalsIgnoreCase(action)) activeSellers.add(L);
                     else if ("BUYING".equalsIgnoreCase(action)) activeBuyers.add(L);
                 } else if ("out of stock".equalsIgnoreCase(status) || "out of space".equalsIgnoreCase(status)) {
@@ -569,9 +583,9 @@ public final class ProfitFinder {
 
                 long epochMs = parseTimestampMs(timestamp);
                 if ("SELLING".equalsIgnoreCase(action)) {
-                    sellers.add(new Listing(item, owner, warp, location, price, stock, nextId++, epochMs));
+                    sellers.add(new Listing(item, owner, warp, location, price, stock, nextId++, epochMs, "sign".equalsIgnoreCase(p.length > 10 ? p[10].trim() : "")));
                 } else if ("BUYING".equalsIgnoreCase(action)) {
-                    buyers.add(new Listing(item, owner, warp, location, price, stock, nextId++, epochMs));
+                    buyers.add(new Listing(item, owner, warp, location, price, stock, nextId++, epochMs, "sign".equalsIgnoreCase(p.length > 10 ? p[10].trim() : "")));
                 } else {
                     skipped++;
                 }
@@ -636,7 +650,7 @@ public final class ProfitFinder {
                         c.seller.item,
                         c.seller.owner, c.seller.warp, c.seller.location, c.seller.price,
                         c.buyer.owner, c.buyer.warp, c.buyer.location, c.buyer.price,
-                        0, c.profitPerItem, true));
+                        0, c.profitPerItem, true, c.seller.signStock, c.buyer.signStock));
             }
             trades.sort(Comparator.comparingDouble((Trade t) -> t.profitPerItem).reversed());
         } else {
@@ -657,7 +671,7 @@ public final class ProfitFinder {
                         c.seller.item,
                         c.seller.owner, c.seller.warp, c.seller.location, c.seller.price,
                         c.buyer.owner, c.buyer.warp, c.buyer.location, c.buyer.price,
-                        qty, c.profitPerItem, false);
+                        qty, c.profitPerItem, false, c.seller.signStock, c.buyer.signStock);
                 if (t.totalProfit < minTotalProfit) continue;
                 trades.add(t);
             }

@@ -56,6 +56,30 @@ public class ModMenuIntegration implements ModMenuApi {
                 .build());
 
         features.addEntry(eb.startBooleanToggle(
+                        Text.literal("Sign Scanner"),
+                        cfg.signScanEnabled)
+                .setDefaultValue(true)
+                .setTooltip(Text.literal("Passively read shop signs from loaded chunks and merge them into shop_data.csv"))
+                .setSaveConsumer(v -> cfg.signScanEnabled = v)
+                .build());
+
+        features.addEntry(eb.startIntSlider(
+                        Text.literal("Sign Scan Radius"),
+                        cfg.signScanRadius, 16, 512)
+                .setDefaultValue(160)
+                .setTooltip(Text.literal("Blocks around the player searched when you press the Scan Shops key (default F6). 10 chunks = 160 blocks"))
+                .setSaveConsumer(v -> cfg.signScanRadius = v)
+                .build());
+
+        features.addEntry(eb.startBooleanToggle(
+                        Text.literal("Sign Scan Feedback"),
+                        cfg.feedbackSignScan)
+                .setDefaultValue(true)
+                .setTooltip(Text.literal("Show a chat message when a sign scan changes shop data"))
+                .setSaveConsumer(v -> cfg.feedbackSignScan = v)
+                .build());
+
+        features.addEntry(eb.startBooleanToggle(
                         Text.literal("Fishing Logger"),
                         cfg.fishingLoggerEnabled)
                 .setDefaultValue(true)

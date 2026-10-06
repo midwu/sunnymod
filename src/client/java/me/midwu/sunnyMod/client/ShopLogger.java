@@ -47,6 +47,7 @@ public class ShopLogger implements ClientModInitializer {
         previousWarp = currentWarp;
         currentWarp = newWarp;
         lastWarpActionTime = System.currentTimeMillis();
+        SignScanner.onWarpChanged();
     }
 
     public static void swapWarps() {
@@ -55,6 +56,7 @@ public class ShopLogger implements ClientModInitializer {
             currentWarp = previousWarp;
             previousWarp = temp;
             lastWarpActionTime = System.currentTimeMillis();
+            SignScanner.onWarpChanged();
         }
     }
 
@@ -67,6 +69,7 @@ public class ShopLogger implements ClientModInitializer {
         String action;
         String status;
         String timestamp;
+        String source = "chat";
         /** Consecutive re-scans in a row with no visible change. Resets to 0 on any change. */
         int noChangeStreak;
 
@@ -81,7 +84,7 @@ public class ShopLogger implements ClientModInitializer {
                     status + "," +
                     timestamp + "," +
                     escapeCsv(currentWarp) + "," +
-                    noChangeStreak;
+                    noChangeStreak + "," + escapeCsv(source);
         }
 
         private String escapeCsv(String value) {
@@ -151,6 +154,7 @@ public class ShopLogger implements ClientModInitializer {
         if (newData != null) {
             newData.shopLocation = String.format("%d %d %d", pos.getX(), pos.getY(), pos.getZ());
             newData.timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
+            newData.source = "chat";
 
             ShopData oldData = findExistingShop(newData.shopLocation);
             newData.noChangeStreak = (oldData == null) ? 0
@@ -179,6 +183,7 @@ public class ShopLogger implements ClientModInitializer {
                     data.status = parts[6];
                     data.timestamp = parts.length > 7 ? parts[7] : "";
                     data.noChangeStreak = parts.length > 9 ? parseIntSafely(parts[9], 0) : 0;
+                    data.source = parts.length > 10 ? parts[10] : "chat";
                     return data;
                 }
             }
@@ -189,7 +194,7 @@ public class ShopLogger implements ClientModInitializer {
     private void saveShopData(ShopData newData, ShopData oldData) {
         boolean isUpdate = oldData != null;
         List<String> lines = new ArrayList<>();
-        String header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp,NoChangeStreak";
+        String header = "Shop Location,Shop Owner,Item,Stock/Space,Price,Action,Status,Timestamp,Warp,NoChangeStreak,Source";
 
         if (Files.exists(CSV_FILE)) {
             try (BufferedReader reader = Files.newBufferedReader(CSV_FILE)) {

@@ -19,6 +19,8 @@ public class Config {
     public boolean shopLoggerEnabled       = false;
     public boolean earningsDetectorEnabled = true;
     public boolean fishingLoggerEnabled    = true;
+    /** Read shop signs already present in loaded client chunks. */
+    public boolean signScanEnabled         = true;
 
     // ── Feedback master switch ────────────────────────────────────────────────
     public boolean feedbackMessages = true;
@@ -29,11 +31,18 @@ public class Config {
     public boolean feedbackShopNotSign     = true;
     public boolean feedbackShopSaveFailed  = true;
     public boolean feedbackWarpSet         = true;
+    public boolean feedbackSignScan        = true;
     public boolean feedbackEarningsPerSale = true;
     public boolean feedbackFishingExported = true;
     public boolean feedbackFishingFailed   = true;
     public boolean feedbackEarningsReset   = true;
     public boolean feedbackFishingOffset   = true;
+
+    // ── Sign scanner
+    /** Radius around the player, in blocks, searched when the manual scan key is pressed. Default: 10 chunks. */
+    public int signScanRadius = 160;
+    /** A recent chat inspection is authoritative over a sign's potentially stale stock. */
+    public int chatStockTrustMinutes = 60;
 
     // ── HUD panel positions ───────────────────────────────────────────────────
     public int fishingX  = 6;
@@ -139,6 +148,7 @@ public class Config {
     public boolean showShopNotSign()     { return feedbackMessages && feedbackShopNotSign; }
     public boolean showShopSaveFailed()  { return feedbackMessages && feedbackShopSaveFailed; }
     public boolean showWarpSet()         { return feedbackMessages && feedbackWarpSet; }
+    public boolean showSignScan()        { return feedbackMessages && feedbackSignScan; }
     public boolean showEarningsPerSale() { return feedbackMessages && feedbackEarningsPerSale; }
     public boolean showFishingExported() { return feedbackMessages && feedbackFishingExported; }
     public boolean showFishingFailed()   { return feedbackMessages && feedbackFishingFailed; }
