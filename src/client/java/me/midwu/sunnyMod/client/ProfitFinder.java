@@ -32,11 +32,13 @@ public final class ProfitFinder {
     private static final Path IGNORE_ITEMS = CONFIG.resolve("ignore_items.txt");
     private static final Path IGNORE_OWNERS = CONFIG.resolve("ignore_owners.txt");
     private static final Path IGNORE_WARPS = CONFIG.resolve("ignore_warps.txt");
+    private static final Path IGNORE_FLIPS = CONFIG.resolve("ignore_flips.txt");
 
     public enum IgnoreKind {
         ITEMS("Items", IGNORE_ITEMS),
         PLAYERS("Players", IGNORE_OWNERS),
-        WARPS("Warps", IGNORE_WARPS);
+        WARPS("Warps", IGNORE_WARPS),
+        FLIPS("Flips", IGNORE_FLIPS);
 
         public final String label;
         public final Path file;
@@ -519,6 +521,7 @@ public final class ProfitFinder {
         Set<String> ignoreItems = loadIgnore(IgnoreKind.ITEMS);
         Set<String> ignoreOwners = loadIgnore(IgnoreKind.PLAYERS);
         Set<String> ignoreWarps = loadIgnore(IgnoreKind.WARPS);
+        Set<String> ignoreFlips = loadIgnore(IgnoreKind.FLIPS);
 
         List<Listing> sellers = new ArrayList<>();
         List<Listing> buyers = new ArrayList<>();
@@ -646,11 +649,13 @@ public final class ProfitFinder {
                         + c.seller.item.toLowerCase(Locale.ROOT) + "|"
                         + c.seller.price + "|" + c.buyer.price;
                 if (!seen.add(key)) continue;
-                trades.add(new Trade(
+                Trade t = new Trade(
                         c.seller.item,
                         c.seller.owner, c.seller.warp, c.seller.location, c.seller.price,
                         c.buyer.owner, c.buyer.warp, c.buyer.location, c.buyer.price,
-                        0, c.profitPerItem, true, c.seller.signStock, c.buyer.signStock));
+                        0, c.profitPerItem, true, c.seller.signStock, c.buyer.signStock);
+                if (isFlipIgnored(ignoreFlips, t)) continue;
+                trades.add(t);
             }
             trades.sort(Comparator.comparingDouble((Trade t) -> t.profitPerItem).reversed());
         } else {
@@ -673,6 +678,7 @@ public final class ProfitFinder {
                         c.buyer.owner, c.buyer.warp, c.buyer.location, c.buyer.price,
                         qty, c.profitPerItem, false, c.seller.signStock, c.buyer.signStock);
                 if (t.totalProfit < minTotalProfit) continue;
+                if (isFlipIgnored(ignoreFlips, t)) continue;
                 trades.add(t);
             }
             trades.sort(Comparator.comparingDouble((Trade t) -> t.totalProfit).reversed());
@@ -684,11 +690,37 @@ public final class ProfitFinder {
 
         String modeTag = selfFlip ? "self-flip" : "flips";
         String summary = String.format(Locale.US,
-                "%s · %,d rows · %,d sell · %,d buy · %,d candidates · %,d trades · %s · ignore i%d/p%d/w%d",
+                "%s · %,d rows · %,d sell · %,d buy · %,d candidates · %,d trades · %s · ignore i%d/p%d/w%d/f%d",
                 modeTag, totalRows, sellers.size(), buyers.size(), candidates.size(), trades.size(),
-                ageNote, ignoreItems.size(), ignoreOwners.size(), ignoreWarps.size());
+                ageNote, ignoreItems.size(), ignoreOwners.size(), ignoreWarps.size(), ignoreFlips.size());
 
         return new Result(trades, sellers.size(), buyers.size(), candidates.size(), summary, selfFlip);
+    }
+
+    public static String flipIgnoreKey(Trade t) {
+        if (t == null) return "";
+        return normalizeKeyPart(t.item) + "|"
+                + normalizeKeyPart(t.seller) + "|"
+                + normalizeKeyPart(t.sellerWarp) + "|"
+                + normalizeKeyPart(t.sellerLocation) + "|"
+                + normalizeKeyPart(t.buyer) + "|"
+                + normalizeKeyPart(t.buyerWarp) + "|"
+                + normalizeKeyPart(t.buyerLocation);
+    }
+
+    public static boolean isFlipIgnored(Trade t) {
+        return isFlipIgnored(loadIgnore(IgnoreKind.FLIPS), t);
+    }
+
+    private static boolean isFlipIgnored(Set<String> ignored, Trade t) {
+        String key = flipIgnoreKey(t);
+        if (key.isEmpty()) return false;
+        return containsIgnore(ignored, key);
+    }
+
+    private static String normalizeKeyPart(String value) {
+        if (value == null) return "";
+        return value.trim().replace("\\", "\\\\").replace("|", "\\|").toLowerCase(Locale.ROOT);
     }
 
     private static boolean containsIgnore(Set<String> set, String value) {

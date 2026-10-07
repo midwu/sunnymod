@@ -31,6 +31,8 @@ public class ProfitScreen extends Screen {
     private static final int FLIPS_WARPS_COL_WIDTH = 210; // Width of the Warps column in Flips mode
     private static final int FLIPS_WARP_BTN_W = 140;      // Width of warp buttons in Flips mode
     private static final int FLIPS_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Flips mode
+    private static final int FLIPS_IGNORE_BTN_W = 54;
+
 
     // --- SELF-FLIP PAGE VARIABLES ---
     private static final int SELF_ITEM_COL_WIDTH = 200;   // Width of the Item column in Self-Flip mode
@@ -63,7 +65,7 @@ public class ProfitScreen extends Screen {
     private static final int IGNORE_COL_1_X = PAD; // X position for first column (Items)
     private static final int IGNORE_COL_2_X = PAD + IGNORE_COL_WIDTH + 20; // X position for second column (Players)
     private static final int IGNORE_COL_3_X = PAD + (IGNORE_COL_WIDTH * 2) + 40; // X position for third column (Warps)
-
+    private static final int IGNORE_COL_4_X = PAD + (IGNORE_COL_WIDTH * 3) + 60;
     // --- END CONFIGURABLE VARIABLES ---
 
     public enum Mode {
@@ -93,6 +95,7 @@ public class ProfitScreen extends Screen {
     private List<String> ignoreItems = List.of();
     private List<String> ignorePlayers = List.of();
     private List<String> ignoreWarps = List.of();
+    private List<String> ignoreFlips = List.of();
     private List<ProfitFinder.WarpSummary> updatePriorities = List.of();
     private List<ProfitFinder.ShopEntry> searchResults = List.of();
     private int scrollOffset = 0;
@@ -129,6 +132,7 @@ public class ProfitScreen extends Screen {
         ignoreItems = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.ITEMS));
         ignorePlayers = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.PLAYERS));
         ignoreWarps = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.WARPS));
+        ignoreFlips = new ArrayList<>(ProfitFinder.loadIgnore(ProfitFinder.IgnoreKind.FLIPS));
         scrollOffset = 0;
         itemsScrollOffset = 0;
         playersScrollOffset = 0;
@@ -205,14 +209,22 @@ public class ProfitScreen extends Screen {
                     .dimensions(PAD + 160, buttonY, 70, 16)
                     .build());
 
-            addField = new TextFieldWidget(textRenderer, PAD + 240, this.height - FOOTER_H + 4, 160, 16,
+            addDrawableChild(ButtonWidget.builder(
+                            Text.literal(ignoreKind == ProfitFinder.IgnoreKind.FLIPS ? "[Flips]" : "Flips"),
+                            b -> {
+                                ignoreKind = ProfitFinder.IgnoreKind.FLIPS;
+                            })
+                    .dimensions(PAD + 240, buttonY, 70, 16)
+                    .build());
+
+            addField = new TextFieldWidget(textRenderer, PAD + 320, this.height - FOOTER_H + 4, 160, 16,
                     Text.literal("Add entry"));
             addField.setMaxLength(64);
             addField.setPlaceholder(Text.literal("Type name, Enter to add"));
             addDrawableChild(addField);
 
             addDrawableChild(ButtonWidget.builder(Text.literal("Add"), b -> tryAddIgnore())
-                    .dimensions(PAD + 406, this.height - FOOTER_H + 4, 40, 16).build());
+                    .dimensions(PAD + 486, this.height - FOOTER_H + 4, 40, 16).build());
         } else if (mode == Mode.UPDATE) {
             String label = hideRecentlyScanned ? "Hide <15m: On" : "Hide <15m: Off";
             addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> {
@@ -295,7 +307,7 @@ public class ProfitScreen extends Screen {
         int listTop = HEADER_H;
         int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         int size = switch (mode) {
-            case IGNORE -> Math.max(ignoreItems.size(), Math.max(ignorePlayers.size(), ignoreWarps.size()));
+            case IGNORE -> Math.max(Math.max(ignoreItems.size(), ignorePlayers.size()), Math.max(ignoreWarps.size(), ignoreFlips.size()));
             case UPDATE -> updatePriorities.size();
             case SEARCH -> searchResults.size();
             default -> result.trades.size();
@@ -352,6 +364,12 @@ public class ProfitScreen extends Screen {
                 int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
                 if (vertical > 0) warpsScrollOffset = Math.max(0, warpsScrollOffset - 1);
                 else if (vertical < 0) warpsScrollOffset = Math.min(Math.max(0, ignoreWarps.size() - visibleRows), warpsScrollOffset + 1);
+                return true;
+            }
+            else if (mouseX >= IGNORE_COL_4_X && mouseX < IGNORE_COL_4_X + IGNORE_COL_WIDTH) {
+                int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+                if (vertical > 0) warpsScrollOffset = Math.max(0, warpsScrollOffset - 1);
+                else if (vertical < 0) warpsScrollOffset = Math.min(Math.max(0, ignoreFlips.size() - visibleRows), warpsScrollOffset + 1);
                 return true;
             }
         }
@@ -421,6 +439,49 @@ public class ProfitScreen extends Screen {
                     return true;
                 }
             }
+
+            // Check Flips column
+            for (int i = 0; i < visibleRows; i++) {
+                int idx = warpsScrollOffset + i;
+                if (idx >= ignoreFlips.size()) break;
+                int rowY = listTop + i * ROW_HEIGHT;
+                if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                        && mouseX >= IGNORE_COL_4_X && mouseX < IGNORE_COL_4_X + IGNORE_COL_WIDTH) {
+                    if (mouseX >= IGNORE_COL_4_X + IGNORE_COL_WIDTH - 50) {
+                        String entry = ignoreFlips.get(idx);
+                        ProfitFinder.removeIgnore(ProfitFinder.IgnoreKind.FLIPS, entry);
+                        reloadIgnoreEntries();
+                        if (client != null) client.setScreen(new ProfitScreen(result));
+                    }
+                    return true;
+                }
+            }
+        }
+
+        if (mode != Mode.IGNORE && click.button() == 0) {
+            int listTop = HEADER_H + 4;
+            int listBottom = this.height - FOOTER_H;
+            int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+            int rowStart = listTop + 12;
+            for (int i = 0; i < visibleRows; i++) {
+                int idx = scrollOffset + i;
+                if (idx >= result.trades.size()) break;
+                int rowY = rowStart + i * ROW_HEIGHT;
+                if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT) {
+                    int ignoreX = this.width - PAD - FLIPS_WARP_BTN_W - FLIPS_IGNORE_BTN_W - 8;
+                    if (mode == Mode.FLIPS && mouseX >= ignoreX && mouseX < ignoreX + FLIPS_IGNORE_BTN_W) {
+                        ignoreTrade(result.trades.get(idx));
+                        return true;
+                    }
+                    if (mode == Mode.SELF) {
+                        int selfIgnoreX = this.width - PAD - SELF_WARP_BTN_W - FLIPS_IGNORE_BTN_W - 8;
+                        if (mouseX >= selfIgnoreX && mouseX < selfIgnoreX + FLIPS_IGNORE_BTN_W) {
+                            ignoreTrade(result.trades.get(idx));
+                            return true;
+                        }
+                    }
+                }
+            }
         }
 
         if (mode == Mode.UPDATE && click.button() == 0) {
@@ -440,6 +501,15 @@ public class ProfitScreen extends Screen {
             }
         }
         return super.mouseClicked(click, doubled);
+    }
+
+    private void ignoreTrade(ProfitFinder.Trade trade) {
+        if (trade == null || client == null) return;
+        String key = ProfitFinder.flipIgnoreKey(trade);
+        if (ProfitFinder.addIgnore(ProfitFinder.IgnoreKind.FLIPS, key)) {
+            result = runFind();
+        }
+        client.setScreen(new ProfitScreen(result));
     }
 
     private void runWarpCommand(String warp) {
@@ -542,7 +612,9 @@ public class ProfitScreen extends Screen {
             ctx.drawText(textRenderer, "Owner", PAD + itemColWidth + 10, hy, 0xFF666666, false);
             ctx.drawText(textRenderer, "Margin", this.width - PAD - profitColWidth, hy, 0xFF666666, false);
         } else {
-            ctx.drawText(textRenderer, "Profit", this.width - PAD - profitColWidth - warpsColWidth - 20, hy, 0xFF666666, false);
+            int ignoreX = this.width - PAD - warpsColWidth - FLIPS_IGNORE_BTN_W - 8;
+            ctx.drawText(textRenderer, "Profit", this.width - PAD - profitColWidth - warpsColWidth - FLIPS_IGNORE_BTN_W - 20, hy, 0xFF666666, false);
+            ctx.drawText(textRenderer, "Ignore", ignoreX, hy, 0xFF666666, false);
             ctx.drawText(textRenderer, "Warps", this.width - PAD - warpsColWidth, hy, 0xFF666666, false);
         }
 
@@ -582,6 +654,12 @@ public class ProfitScreen extends Screen {
                         this.width - PAD - profitColWidth, rowY + 2, 0xFF55FF55, false);
 
                 // Add warp button for Self-Flip mode
+                int selfIgnoreX = this.width - PAD - warpBtnW - FLIPS_IGNORE_BTN_W - 8;
+                addDrawableChild(ButtonWidget.builder(Text.literal("Ignore"), b -> ignoreTrade(t))
+                        .dimensions(selfIgnoreX, rowY, FLIPS_IGNORE_BTN_W, 16)
+                        .tooltip(Tooltip.of(Text.literal("Permanently ignore this exact flip")))
+                        .build());
+
                 int warpBtnX = this.width - PAD - warpBtnW;
                 String sellerWarpLabel = shortWarp(t.sellerWarp, warpNameMaxChars);
                 if (!t.sellerWarp.isBlank()) {
@@ -596,9 +674,17 @@ public class ProfitScreen extends Screen {
                 }
             } else {
                 ctx.drawText(textRenderer, String.format(Locale.US, "$%,.0f", t.totalProfit),
-                        this.width - PAD - profitColWidth - warpsColWidth - 20, rowY + 2, 0xFF55FF55, false);
+                        this.width - PAD - profitColWidth - warpsColWidth - FLIPS_IGNORE_BTN_W - 20, rowY + 2, 0xFF55FF55, false);
 
                 ctx.drawText(textRenderer, t.seller + " → " + t.buyer, PAD, rowY + 11, 0xFF666666, false);
+
+                int ignoreX = this.width - PAD - warpBtnW - FLIPS_IGNORE_BTN_W - 8;
+                ButtonWidget ignoreBtn = ButtonWidget.builder(Text.literal("Ignore"),
+                                b -> ignoreTrade(t))
+                        .dimensions(ignoreX, rowY, FLIPS_IGNORE_BTN_W, 16)
+                        .tooltip(Tooltip.of(Text.literal("Permanently ignore this exact flip")))
+                        .build();
+                addDrawableChild(ignoreBtn);
 
                 int warpBtnX = this.width - PAD - warpBtnW - 10;
                 String sellerWarpLabel = shortWarp(t.sellerWarp, warpNameMaxChars);
@@ -765,6 +851,7 @@ public class ProfitScreen extends Screen {
         ctx.drawText(textRenderer, "Items", IGNORE_COL_1_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Players", IGNORE_COL_2_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
         ctx.drawText(textRenderer, "Warps", IGNORE_COL_3_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
+        ctx.drawText(textRenderer, "Flips", IGNORE_COL_4_X, listTop - IGNORE_TEXT_VERTICAL_SPACING, 0xFFAAAAAA, false);
 
         // Highlight the selected column
         int headerY = listTop - IGNORE_TEXT_VERTICAL_SPACING - 2;
@@ -774,6 +861,8 @@ public class ProfitScreen extends Screen {
             ctx.fill(IGNORE_COL_2_X - 2, headerY, IGNORE_COL_2_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
         } else if (ignoreKind == ProfitFinder.IgnoreKind.WARPS) {
             ctx.fill(IGNORE_COL_3_X - 2, headerY, IGNORE_COL_3_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
+        } else if (ignoreKind == ProfitFinder.IgnoreKind.FLIPS) {
+            ctx.fill(IGNORE_COL_4_X - 2, headerY, IGNORE_COL_4_X + IGNORE_COL_WIDTH + 2, headerY + 12, 0x33FFFFFF);
         }
 
         // Draw Items column
@@ -831,6 +920,21 @@ public class ProfitScreen extends Screen {
             ctx.drawText(textRenderer, displayEntry, IGNORE_COL_3_X, rowY + 6, 0xFFFFFFFF, false);
             int remColor = (hover && mouseX >= IGNORE_COL_3_X + IGNORE_COL_WIDTH - 50) ? 0xFFFF5555 : 0xFFAA6666;
             ctx.drawText(textRenderer, "Remove", IGNORE_COL_3_X + IGNORE_COL_WIDTH - 45, rowY + 6, remColor, false);
+        }
+
+        // Draw Flips column
+        for (int i = 0; i < visibleRows; i++) {
+            int idx = warpsScrollOffset + i;
+            if (idx >= ignoreFlips.size()) break;
+            int rowY = listTop + i * ROW_HEIGHT;
+            String entry = ignoreFlips.get(idx);
+            String displayEntry = entry.length() > 20 ? entry.substring(0, 19) + "…" : entry;
+            boolean hover = mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
+                    && mouseX >= IGNORE_COL_4_X && mouseX < IGNORE_COL_4_X + IGNORE_COL_WIDTH;
+            if (hover) ctx.fill(IGNORE_COL_4_X - 2, rowY - 1, IGNORE_COL_4_X + IGNORE_COL_WIDTH + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
+            ctx.drawText(textRenderer, displayEntry, IGNORE_COL_4_X, rowY + 6, 0xFFFFFFFF, false);
+            int remColor = (hover && mouseX >= IGNORE_COL_4_X + IGNORE_COL_WIDTH - 50) ? 0xFFFF5555 : 0xFFAA6666;
+            ctx.drawText(textRenderer, "Remove", IGNORE_COL_4_X + IGNORE_COL_WIDTH - 45, rowY + 6, remColor, false);
         }
     }
 
