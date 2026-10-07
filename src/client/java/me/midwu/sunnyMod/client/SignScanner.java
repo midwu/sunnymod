@@ -188,6 +188,7 @@ public final class SignScanner {
         ChunkPos center = mc.player.getChunkPos();
         BlockPos origin = mc.player.getBlockPos();
         Map<String, ShopRow> found = new LinkedHashMap<>();
+        int loadedSigns = 0;
 
         for (int dx = -chunkRadius; dx <= chunkRadius; dx++) {
             for (int dz = -chunkRadius; dz <= chunkRadius; dz++) {
@@ -196,6 +197,7 @@ public final class SignScanner {
                 for (BlockEntity be : chunk.getBlockEntities().values()) {
                     if (!(be instanceof SignBlockEntity sign)) continue;
                     if (!sign.getPos().isWithinDistance(origin, radius)) continue;
+                    loadedSigns++;
                     ShopRow row = parse(sign);
                     if (row != null) found.put(row.location, row);
                 }
@@ -208,20 +210,31 @@ public final class SignScanner {
         lastCount = found.size();
 
         if (feedback && mc.player != null) {
-            sendScanFeedback(mc, report);
+            sendScanFeedback(mc, report, loadedSigns);
         }
         return found.size();
     }
 
-    private static void sendScanFeedback(MinecraftClient mc, ScanReport rep) {
+    private static void sendScanFeedback(MinecraftClient mc, ScanReport rep, int loadedSigns) {
         String warpDisplay = rep.warp().isBlank() ? "(no warp)" : rep.warp();
         mc.player.sendMessage(Text.literal(
-                "§a[Shop] Scan: §f" + rep.found() + " §7signs · §f" + rep.updated()
+                "§a[Shop] Scan: §f" + rep.found() + " §7shop signs / §f" + loadedSigns
+                        + " §7loaded signs · §f" + rep.updated()
                         + " §7updated §8(§f" + rep.newCount() + " §7new · §f" + rep.changedCount()
                         + " §7changed · §f" + rep.unchangedCount() + " §7unchanged§8)"), false);
         mc.player.sendMessage(Text.literal(
                 "§7[Shop] §f" + rep.missingCount() + " §7CSV shops at this warp not seen · §f"
                         + rep.csvRowsForWarp() + " §7shops in CSV for §f" + warpDisplay), false);
+
+        if (loadedSigns > 0 && rep.found() == 0) {
+            mc.player.sendMessage(Text.literal(
+                    "§e[Shop] Loaded signs were found, but none matched the shop format. "
+                            + "Expected owner / Selling|Buying / item / $price."), false);
+        } else if (rep.found() > 0 && rep.updated() == 0) {
+            mc.player.sendMessage(Text.literal(
+                    "§7[Shop] No CSV rows changed. Existing chat data may be protected for "
+                            + Config.get().chatStockTrustMinutes + " minutes."), false);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -230,13 +243,39 @@ public final class SignScanner {
 
     private static ShopRow parse(SignBlockEntity sign) {
         String[] lines = lines(sign.getFrontText());
-        Matcher m = ACTION.matcher(lines[1].trim());
-        if (!m.matches()) return null;
 
-        String actionToken = m.group(1).toUpperCase(Locale.ROOT);
+        // Do not assume the server always puts the shop fields on exactly the
+        // same sign line. The known format is owner / action+stock / item /
+        // price, but blank lines and formatting changes have occurred in the
+        // wild. Find the semantic fields instead of silently rejecting the sign.
+        int actionLine = -1;
+        Matcher actionMatcher = null;
+        for (int i = 0; i < lines.length; i++) {
+            Matcher candidate = ACTION.matcher(lines[i].trim());
+            if (candidate.matches()) {
+                actionLine = i;
+                actionMatcher = candidate;
+                break;
+            }
+        }
+        if (actionLine < 0 || actionMatcher == null) return null;
+
+        int priceLine = -1;
+        Matcher priceMatcher = null;
+        for (int i = 0; i < lines.length; i++) {
+            Matcher candidate = PRICE.matcher(lines[i]);
+            if (candidate.find()) {
+                priceLine = i;
+                priceMatcher = candidate;
+                break;
+            }
+        }
+        if (priceLine < 0 || priceMatcher == null) return null;
+
+        String actionToken = actionMatcher.group(1).toUpperCase(Locale.ROOT);
         String action = actionToken.equals("OUT OF STOCK") || actionToken.equals("OUT OF SPACE")
                 ? "UNKNOWN" : actionToken;
-        int stock = parseInt(m.group(2), 0);
+        int stock = parseInt(actionMatcher.group(2), 0);
 
         String status = "Active";
         if (actionToken.equals("OUT OF STOCK")) {
@@ -247,22 +286,39 @@ public final class SignScanner {
             stock = 0;
         }
 
-        String item = lines[2].trim();
-        if (item.isEmpty()) return null;
-        // The live server format is: owner | action+stock | item | price+unit.
-        // The item and owner are intentionally taken from the plain rendered text,
-        // so colour/font components do not affect matching.
+        // Owner is the first non-empty line before the action.
+        String owner = "";
+        for (int i = 0; i < actionLine; i++) {
+            if (!lines[i].trim().isEmpty()) {
+                owner = lines[i].trim();
+                break;
+            }
+        }
 
-        Matcher pm = PRICE.matcher(lines[3]);
-        if (!pm.find()) return null;
+        // Item is the first non-empty line after the action and before the price.
+        String item = "";
+        for (int i = actionLine + 1; i < lines.length; i++) {
+            if (i == priceLine) continue;
+            if (!lines[i].trim().isEmpty() && !PRICE.matcher(lines[i]).find()) {
+                item = lines[i].trim();
+                break;
+            }
+        }
+
+        // Fall back to the traditional positions for a normal 4-line sign.
+        if (owner.isEmpty() && actionLine > 0) owner = lines[0].trim();
+        if (item.isEmpty() && actionLine + 1 < lines.length && actionLine + 1 != priceLine) {
+            item = lines[actionLine + 1].trim();
+        }
+        if (owner.isEmpty() || item.isEmpty()) return null;
+
         double price;
         try {
-            price = Double.parseDouble(pm.group(1).replace(",", ""));
+            price = Double.parseDouble(priceMatcher.group(1).replace(",", ""));
         } catch (NumberFormatException e) {
             return null;
         }
 
-        String owner = lines[0].trim();
         BlockPos p = sign.getPos();
         String location = p.getX() + " " + p.getY() + " " + p.getZ();
         return new ShopRow(location, owner, item, stock, price, action, status);
