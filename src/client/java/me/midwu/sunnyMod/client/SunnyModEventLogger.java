@@ -33,21 +33,8 @@ public final class SunnyModEventLogger implements ClientModInitializer {
     public void onInitializeClient() { init(); }
 
     public static void init() {
-        if (initialized) return;
+        // Event logging disabled: do not register chat/game/tick callbacks.
         initialized = true;
-        try {
-            Files.createDirectories(LOG_FILE.getParent());
-            write("LOGGER", "SunnyMod event logger started");
-            write("LOGGER", "File=" + LOG_FILE.toAbsolutePath());
-        } catch (Throwable t) {
-            System.err.println("[SunnyModEventLogger] Failed to initialize: " + t);
-        }
-
-        ClientReceiveMessageEvents.CHAT.register((message, playerChatMessage, sender, boundChatType, timeStamp) ->
-                write("CHAT", text(message)));
-        ClientReceiveMessageEvents.GAME.register((message, overlay) ->
-                write(overlay ? "ACTIONBAR" : "GAME", text(message)));
-        ClientTickEvents.END_CLIENT_TICK.register(SunnyModEventLogger::tickBossBars);
     }
 
     private static String text(Text message) {
@@ -122,18 +109,8 @@ public final class SunnyModEventLogger implements ClientModInitializer {
     }
 
     public static void write(String type, String payload) {
-        String line = "[" + LocalDateTime.now().format(TS) + "] " + type + " " + payload;
-        try {
-            Files.createDirectories(LOG_FILE.getParent());
-            try (BufferedWriter out = Files.newBufferedWriter(LOG_FILE, StandardOpenOption.CREATE,
-                    StandardOpenOption.WRITE, StandardOpenOption.APPEND)) {
-                out.write(line);
-                out.newLine();
-            }
-        } catch (IOException e) {
-            System.err.println("[SunnyModEventLogger] " + line);
-            System.err.println("[SunnyModEventLogger] Failed to write event_log.txt: " + e);
-        }
+        // Intentionally disabled. Keep this method as a no-op so existing mixins
+        // and features that call it remain source/binary compatible.
     }
 
     private record BossSnapshot(String name, float percent, String color, String style) {}
