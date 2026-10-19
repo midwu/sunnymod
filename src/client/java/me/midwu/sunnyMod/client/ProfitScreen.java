@@ -52,12 +52,12 @@ public class ProfitScreen extends Screen {
     private static final int SEARCH_WARP_NAME_MAX_CHARS = 22;   // Max characters for warp names in Search mode
 
     // --- UPDATE PAGE VARIABLES ---
-    private static final int UPDATE_WARP_COL_WIDTH = 140;  // Width of the Warp column in Update mode
-    private static final int UPDATE_ITEMS_COL_WIDTH = 120;  // Width of the Items column in Update mode
-    private static final int UPDATE_EDGE_COL_WIDTH = 140;   // Width of the Total Edge column in Update mode
-    private static final int UPDATE_AGE_COL_WIDTH = 120;   // Width of the Age column in Update mode
-    private static final int UPDATE_WARP_BTN_W = 180;      // Width of warp button in Update mode
-    private static final int UPDATE_WARP_NAME_MAX_CHARS = 24;     // Max characters for warp names in Update mode
+    private static final int UPDATE_WARP_COL_WIDTH = 230;  // Width of the Warp name column in Update mode
+    private static final int UPDATE_SHOPS_COL_WIDTH = 90;  // Width of the Live shops column in Update mode
+    private static final int UPDATE_AGE_COL_WIDTH = 110;   // Width of the Oldest shop column in Update mode
+    private static final int UPDATE_WARP_BTN_W = 70;       // Width of the Warp button in Update mode
+    private static final int UPDATE_WARP_NAME_MAX_CHARS = 32;     // Max characters for warp names in Update mode
+    private static final int UPDATE_ROWS_TOP = HEADER_H + 4 + 12; // Y of the first Update row (below the column headings)
 
     // --- IGNORE TAB VARIABLES ---
     private static final int IGNORE_TEXT_VERTICAL_SPACING = 12; // Vertical spacing between text lines in Ignore tab
@@ -83,7 +83,6 @@ public class ProfitScreen extends Screen {
     static double ageFilterHours = 24.0;
     static Mode mode = Mode.FLIPS;
     static ProfitFinder.IgnoreKind ignoreKind = ProfitFinder.IgnoreKind.ITEMS; // Default to Items
-    static boolean hideRecentlyScanned = true;
 
     // Search tab state — persists across screen rebuilds like the other filters above.
     static String searchQueryText = "";
@@ -96,7 +95,8 @@ public class ProfitScreen extends Screen {
     private List<String> ignorePlayers = List.of();
     private List<String> ignoreWarps = List.of();
     private List<String> ignoreFlips = List.of();
-    private List<ProfitFinder.WarpSummary> updatePriorities = List.of();
+    private List<UpdateQueue.WarpEntry> updateQueue = List.of();
+    private int updateUnseen = 0; // live shops at the current warp not seen since the visit began
     private List<ProfitFinder.ShopEntry> searchResults = List.of();
     private int scrollOffset = 0;
     private int maxScroll = 0;
@@ -114,7 +114,7 @@ public class ProfitScreen extends Screen {
         if (mode == Mode.IGNORE) {
             reloadIgnoreEntries();
         } else if (mode == Mode.UPDATE) {
-            reloadUpdatePriorities();
+            reloadUpdateQueue();
         } else if (mode == Mode.SEARCH) {
             runSearch();
         }
@@ -139,8 +139,9 @@ public class ProfitScreen extends Screen {
         warpsScrollOffset = 0;
     }
 
-    private void reloadUpdatePriorities() {
-        updatePriorities = ProfitFinder.findUpdatePrioritiesByWarp(hideRecentlyScanned);
+    private void reloadUpdateQueue() {
+        updateQueue = UpdateQueue.loadQueue();
+        updateUnseen = UpdateQueue.countUnseen(ShopLogger.getLastWarp(), ShopLogger.getWarpVisitStartMs());
         scrollOffset = 0;
     }
 
@@ -156,7 +157,7 @@ public class ProfitScreen extends Screen {
             reloadIgnoreEntries();
             if (client != null) client.setScreen(new ProfitScreen(result));
         } else if (m == Mode.UPDATE) {
-            reloadUpdatePriorities();
+            reloadUpdateQueue();
             if (client != null) client.setScreen(new ProfitScreen(result));
         } else if (m == Mode.SEARCH) {
             runSearch();
@@ -226,14 +227,17 @@ public class ProfitScreen extends Screen {
             addDrawableChild(ButtonWidget.builder(Text.literal("Add"), b -> tryAddIgnore())
                     .dimensions(PAD + 486, this.height - FOOTER_H + 4, 40, 16).build());
         } else if (mode == Mode.UPDATE) {
-            String label = hideRecentlyScanned ? "Hide <15m: On" : "Hide <15m: Off";
-            addDrawableChild(ButtonWidget.builder(Text.literal(label), b -> {
-                        hideRecentlyScanned = !hideRecentlyScanned;
-                        if (client != null) client.setScreen(new ProfitScreen(result));
-                    }).dimensions(this.width - PAD - 170, 6, 85, 18)
+            ButtonWidget markBtn = ButtonWidget.builder(
+                            Text.literal("Mark unseen as dead (" + updateUnseen + ")"),
+                            b -> markUnseenAsDead())
+                    .dimensions(400, 6, 190, 18)
                     .tooltip(Tooltip.of(Text.literal(
-                            "Skip shops you already rescanned in the last 15 minutes.")))
-                    .build());
+                            "Marks every live shop of your CURRENT warp that was not seen since you\n"
+                                    + "warped there (i.e. the scanner did not stamp it) as Dead.\n"
+                                    + "Scan the signs first. A backup is saved as shop_data.csv.bak.")))
+                    .build();
+            markBtn.active = updateUnseen > 0;
+            addDrawableChild(markBtn);
 
             addDrawableChild(ButtonWidget.builder(Text.literal("Refresh"), b -> {
                 if (client != null) client.setScreen(new ProfitScreen(result));
@@ -305,14 +309,56 @@ public class ProfitScreen extends Screen {
 
         int listBottom = this.height - FOOTER_H;
         int listTop = HEADER_H;
-        int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
+        int visibleRows = mode == Mode.UPDATE
+                ? updateVisibleRows()
+                : Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
         int size = switch (mode) {
             case IGNORE -> Math.max(Math.max(ignoreItems.size(), ignorePlayers.size()), Math.max(ignoreWarps.size(), ignoreFlips.size()));
-            case UPDATE -> updatePriorities.size();
+            case UPDATE -> updateQueue.size();
             case SEARCH -> searchResults.size();
             default -> result.trades.size();
         };
         maxScroll = Math.max(0, size - visibleRows);
+
+        if (mode == Mode.UPDATE) {
+            if (scrollOffset > maxScroll) scrollOffset = maxScroll;
+            addUpdateRowButtons(visibleRows);
+        }
+    }
+
+    private int updateVisibleRows() {
+        return Math.max(1, (this.height - FOOTER_H - UPDATE_ROWS_TOP) / ROW_HEIGHT);
+    }
+
+    /** One "Warp" button per visible Update row. Rebuilt (clearChildren + init) whenever the list scrolls. */
+    private void addUpdateRowButtons(int visibleRows) {
+        int btnX = this.width - PAD - UPDATE_WARP_BTN_W;
+        for (int i = 0; i < visibleRows; i++) {
+            int idx = scrollOffset + i;
+            if (idx >= updateQueue.size()) break;
+            UpdateQueue.WarpEntry w = updateQueue.get(idx);
+            int rowY = UPDATE_ROWS_TOP + i * ROW_HEIGHT;
+            addDrawableChild(ButtonWidget.builder(Text.literal("Warp"), b -> runWarpCommandAndHighlight(w.command))
+                    .dimensions(btnX, rowY, UPDATE_WARP_BTN_W, 16)
+                    .tooltip(Tooltip.of(Text.literal("Warp to: " + w.command)))
+                    .build());
+        }
+    }
+
+    /** Marks every live shop of the current warp that was not seen since the visit began as Dead. */
+    private void markUnseenAsDead() {
+        String warp = ShopLogger.getLastWarp();
+        int n = UpdateQueue.markUnseenDead(warp, ShopLogger.getWarpVisitStartMs());
+        if (client != null && client.player != null) {
+            if (n < 0) {
+                client.player.sendMessage(Text.literal("§c[Update] Failed to update shop_data.csv"), false);
+            } else {
+                client.player.sendMessage(Text.literal("§a[Update] Marked §f" + n + " §7unseen shop"
+                        + (n == 1 ? "" : "s") + " as dead at §f" + shortWarp(warp, 40)), false);
+            }
+        }
+        ShopHighlighter.deactivate();
+        if (client != null) client.setScreen(new ProfitScreen(result)); // constructor reloads the queue
     }
 
     private void tryAddIgnore() {
@@ -376,6 +422,10 @@ public class ProfitScreen extends Screen {
 
         if (vertical > 0) scrollOffset = Math.max(0, scrollOffset - 1);
         else if (vertical < 0) scrollOffset = Math.min(maxScroll, scrollOffset + 1);
+        if (mode == Mode.UPDATE) {
+            clearChildren();
+            init(); // row buttons depend on scrollOffset
+        }
         return true;
     }
 
@@ -484,22 +534,6 @@ public class ProfitScreen extends Screen {
             }
         }
 
-        if (mode == Mode.UPDATE && click.button() == 0) {
-            int listTop = HEADER_H + 4;
-            int listBottom = this.height - FOOTER_H;
-            int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
-            int rowStart = listTop + 12;
-            for (int i = 0; i < visibleRows; i++) {
-                int idx = scrollOffset + i;
-                if (idx >= updatePriorities.size()) break;
-                int rowY = rowStart + i * ROW_HEIGHT;
-                if (mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
-                        && mouseX >= PAD && mouseX < this.width - PAD) {
-                    runWarpCommandAndHighlight(updatePriorities.get(idx).warp);
-                    return true;
-                }
-            }
-        }
         return super.mouseClicked(click, doubled);
     }
 
@@ -939,83 +973,74 @@ public class ProfitScreen extends Screen {
     }
 
     private void renderUpdatePriorities(DrawContext ctx, int mouseX, int mouseY) {
-        ctx.drawText(textRenderer, "Warps to re-check — out of stock/space, ranked by payoff", PAD, 28, 0xFFCCCCCC, false);
+        int liveShops = 0;
+        for (UpdateQueue.WarpEntry w : updateQueue) liveShops += w.liveShops;
+
+        ctx.drawText(textRenderer, "Update queue — warps ordered by their OLDEST live shop (dead shops skipped)",
+                PAD, 28, 0xFFCCCCCC, false);
+        String here = UpdateQueue.bareWarp(ShopLogger.getLastWarp());
         ctx.drawText(textRenderer,
-                updatePriorities.size() + " warps · click a row to warp there",
+                updateQueue.size() + " warps · " + liveShops + " live shops · current warp: "
+                        + (here.isEmpty() ? "(none)" : shortWarp(here, 30))
+                        + " · unseen here: " + updateUnseen,
                 PAD, 40, 0xFF888888, false);
 
-        int listTop = HEADER_H + 4;
-        int listBottom = this.height - FOOTER_H;
-        int visibleRows = Math.max(1, (listBottom - listTop) / ROW_HEIGHT);
-        maxScroll = Math.max(0, updatePriorities.size() - visibleRows);
-        if (scrollOffset > maxScroll) scrollOffset = maxScroll;
-
-        int hy = listTop;
+        int hy = HEADER_H + 4;
         ctx.drawText(textRenderer, "Warp", PAD, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Items", PAD + UPDATE_ITEMS_COL_WIDTH, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Total edge", PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH, hy, 0xFF666666, false);
-        ctx.drawText(textRenderer, "Age", PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH + UPDATE_AGE_COL_WIDTH, hy, 0xFF666666, false);
+        ctx.drawText(textRenderer, "Live shops", PAD + UPDATE_WARP_COL_WIDTH, hy, 0xFF666666, false);
+        ctx.drawText(textRenderer, "Oldest shop", PAD + UPDATE_WARP_COL_WIDTH + UPDATE_SHOPS_COL_WIDTH, hy, 0xFF666666, false);
 
-        int rowStart = listTop + 12;
-        if (updatePriorities.isEmpty()) {
-            ctx.drawText(textRenderer, "Nothing stale right now — all tracked shops are Active.",
-                    PAD, rowStart + 8, 0xFF888888, false);
+        if (updateQueue.isEmpty()) {
+            ctx.drawText(textRenderer, "No warps with live shops in shop_data.csv.",
+                    PAD, UPDATE_ROWS_TOP + 8, 0xFF888888, false);
         }
 
-        clearChildren();
-        init();
-
-        ProfitFinder.WarpSummary hovered = null;
+        int visibleRows = updateVisibleRows();
         for (int i = 0; i < visibleRows; i++) {
             int idx = scrollOffset + i;
-            if (idx >= updatePriorities.size()) break;
-            ProfitFinder.WarpSummary w = updatePriorities.get(idx);
-            int rowY = rowStart + i * ROW_HEIGHT;
+            if (idx >= updateQueue.size()) break;
+            UpdateQueue.WarpEntry w = updateQueue.get(idx);
+            int rowY = UPDATE_ROWS_TOP + i * ROW_HEIGHT;
 
-            boolean hasWarp = !w.warp.isBlank();
-            boolean hover = hasWarp && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT
-                    && mouseX >= PAD && mouseX < this.width - PAD;
-            if (hover) {
-                ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x33FFFFFF);
-                hovered = w;
+            boolean isHere = !here.isEmpty() && w.bare.equalsIgnoreCase(here);
+            if (isHere) {
+                ctx.fill(PAD - 2, rowY - 1, this.width - PAD + 2, rowY + ROW_HEIGHT - 2, 0x3355AA55);
             }
 
-            String warpName = hasWarp ? shortWarp(w.warp, UPDATE_WARP_NAME_MAX_CHARS) : "(no warp saved)";
-            int nameColor = hasWarp ? 0xFFFFFFAA : 0xFF777766;
-            ctx.drawText(textRenderer, warpName, PAD, rowY + 2, nameColor, false);
-            ctx.drawText(textRenderer, String.valueOf(w.items.size()), PAD + UPDATE_ITEMS_COL_WIDTH, rowY + 2, 0xFFCCCCCC, false);
-            ctx.drawText(textRenderer, w.totalPotentialValue > 0
-                            ? String.format(Locale.US, "+$%.2f", w.totalPotentialValue) : "—",
-                    PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH, rowY + 2, w.totalPotentialValue > 0 ? 0xFF55FF55 : 0xFF666666, false);
-            ctx.drawText(textRenderer, String.format(Locale.US, "%.0fh", w.maxAgeHours),
-                    PAD + UPDATE_ITEMS_COL_WIDTH + UPDATE_EDGE_COL_WIDTH + UPDATE_AGE_COL_WIDTH, rowY + 2, 0xFFAAAAAA, false);
-
-            // Add warp button for Update Priorities mode
-            int warpBtnX = this.width - PAD - UPDATE_WARP_BTN_W;
-            if (hasWarp) {
-                ButtonWidget warpBtn = ButtonWidget.builder(
-                                Text.literal(shortWarp(w.warp, UPDATE_WARP_NAME_MAX_CHARS)),
-                                b -> runWarpCommandAndHighlight(w.warp)
-                        ).dimensions(warpBtnX, rowY, UPDATE_WARP_BTN_W, 16)
-                        .tooltip(Tooltip.of(Text.literal("Warp to: " + w.warp)))
-                        .build();
-                addDrawableChild(warpBtn);
-            }
+            ctx.drawText(textRenderer, shortWarp(w.bare, UPDATE_WARP_NAME_MAX_CHARS) + (isHere ? " (current)" : ""),
+                    PAD, rowY + 4, isHere ? 0xFF88FF88 : 0xFFFFFFAA, false);
+            ctx.drawText(textRenderer, String.valueOf(w.liveShops),
+                    PAD + UPDATE_WARP_COL_WIDTH, rowY + 4, 0xFFCCCCCC, false);
+            ctx.drawText(textRenderer, formatAge(w.oldestMs),
+                    PAD + UPDATE_WARP_COL_WIDTH + UPDATE_SHOPS_COL_WIDTH, rowY + 4, ageColor(w.oldestMs), false);
         }
 
-        if (hovered != null) {
-            List<Text> tip = new ArrayList<>();
-            tip.add(Text.literal(hovered.warp.isEmpty() ? "(no warp saved)" : hovered.warp));
-            tip.add(Text.literal(String.format(Locale.US, "%d stale items · total edge +$%.2f",
-                    hovered.items.size(), hovered.totalPotentialValue)));
-            tip.add(Text.literal(String.format(Locale.US, "Oldest scan %.0fh ago · worst streak %d unchanged rescans",
-                    hovered.maxAgeHours, hovered.maxNoChangeStreak)));
+        ctx.drawText(textRenderer,
+                "F8 · scroll · Warp, scan the signs, then reopen F8 and press \"Mark unseen as dead\"",
+                PAD, this.height - 18, 0xFF666666, false);
+    }
 
-            tip.add(Text.literal("Click to warp: " + (hovered.warp.isEmpty() ? "(no warp saved)" : hovered.warp)));
-            ctx.drawTooltip(textRenderer, tip, mouseX, mouseY);
-        }
+    /** "3d 4h", "5h 12m", "9m", "<1m" — age of a shop timestamp. 0 = unknown. */
+    private static String formatAge(long epochMs) {
+        if (epochMs <= 0) return "unknown";
+        long secs = Math.max(0, (System.currentTimeMillis() - epochMs) / 1000);
+        long d = secs / 86400;
+        long h = (secs % 86400) / 3600;
+        long m = (secs % 3600) / 60;
+        if (d > 0) return d + "d " + h + "h";
+        if (h > 0) return h + "h " + m + "m";
+        if (m > 0) return m + "m";
+        return "<1m";
+    }
 
-        ctx.drawText(textRenderer, "F8 · scroll", PAD, this.height - 18, 0xFF666666, false);
+    /** Older = redder, so the warps that most need a visit stand out. */
+    private static int ageColor(long epochMs) {
+        if (epochMs <= 0) return 0xFFFF5555;
+        long hours = Math.max(0, (System.currentTimeMillis() - epochMs) / 3_600_000L);
+        if (hours >= 72) return 0xFFFF5555;
+        if (hours >= 24) return 0xFFFFAA55;
+        if (hours >= 6) return 0xFFFFFF55;
+        return 0xFF55FF55;
     }
 
     private static String shortWarp(String w, int maxChars) {

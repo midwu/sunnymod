@@ -378,9 +378,9 @@ public final class SignScanner {
                 action = field(old, 5);
             }
 
-            // Do not rewrite an unchanged sign every scan. The timestamp is the
-            // observation time for the last actual change, not a heartbeat. This
-            // prevents constant disk writes and preserves useful freshness data.
+            // The whole file is rewritten once per scan anyway, so an unchanged sign
+            // simply gets its timestamp refreshed to "last seen". The F8 Update tab
+            // relies on this to know which shops were visited.
             boolean unchanged = old != null
                     && field(old, 1).equals(row.owner)
                     && field(old, 2).equals(row.item)
@@ -419,6 +419,9 @@ public final class SignScanner {
                     cur[8] = warp;
                     existing.put(row.location, cur);
                 }
+                // Stamp the sign as seen right now (cur has >= 11 columns here).
+                cur[7] = LocalDateTime.now().format(TS);
+                existing.put(row.location, cur);
                 unchangedCount++;
                 continue;
             }

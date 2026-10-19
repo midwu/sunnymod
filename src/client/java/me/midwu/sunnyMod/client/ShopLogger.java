@@ -43,10 +43,16 @@ public class ShopLogger implements ClientModInitializer {
     public static Path getConfigDir() { return CONFIG_DIR; }
     public static long getLastWarpActionTime() { return lastWarpActionTime; }
 
+    /** When the player last arrived at {@link #getLastWarp()} (epoch ms). Shops of that warp with an
+     *  older timestamp were not seen during this visit. 0 = no warp visit yet this session. */
+    private static long warpVisitStartMs = 0L;
+    public static long getWarpVisitStartMs() { return warpVisitStartMs; }
+
     public static void pushWarp(String newWarp) {
         previousWarp = currentWarp;
         currentWarp = newWarp;
         lastWarpActionTime = System.currentTimeMillis();
+        warpVisitStartMs = lastWarpActionTime;
         SignScanner.onWarpChanged();
     }
 
@@ -56,6 +62,7 @@ public class ShopLogger implements ClientModInitializer {
             currentWarp = previousWarp;
             previousWarp = temp;
             lastWarpActionTime = System.currentTimeMillis();
+            warpVisitStartMs = lastWarpActionTime;
             SignScanner.onWarpChanged();
         }
     }

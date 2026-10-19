@@ -72,6 +72,7 @@ public class ShopHighlighter implements ClientModInitializer {
 
             String warpColumn = row.length > 8 ? row[8].trim() : "";
             if (!warpMatches(warpColumn, currentWarp)) continue;
+            if (row.length > 6 && "dead".equalsIgnoreCase(row[6].trim())) continue; // gone — nothing to update
 
             BlockPos pos = parseLocation(location);
             if (pos == null) {
